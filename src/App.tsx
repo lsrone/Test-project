@@ -23,6 +23,7 @@ import {
   Plus,
   Radio,
   Repeat2,
+  RefreshCw,
   Search,
   Settings2,
   Shuffle,
@@ -50,6 +51,7 @@ import { useStoredState } from './storage'
 import { YouTubeLibrary, YouTubePlayer } from './YouTubeLibrary'
 import { isPortable, youtubeUrl, type YouTubeVideo } from './youtube'
 import OpenLibrary from './OpenLibrary'
+import { useWave } from './useWave'
 import {
   downloadTrack,
   listSavedTracks,
@@ -142,6 +144,7 @@ export default function App() {
   const offlineUrls = useRef(new Map<string, string>())
   const [volume, setVolume] = useStoredState('volna.volume', 0.7)
   const [queue, setQueue] = useState(tracks.map((t) => t.id))
+  const [waveActive, setWaveActive] = useState(false)
   const [playing, setPlaying] = useState(false)
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -178,10 +181,80 @@ export default function App() {
   const searchResults = useMemo(() => searchTracks(tracks, query), [tracks, query])
 
   function importTracks(items: Track[]) {
+    if (!items.length) return
     setOnlineTracks((previous) => [
       ...new Map([...previous, ...items].map((track) => [track.id, track])).values(),
     ])
   }
+  const wave = useWave({
+    enabled: page === 'radio' || waveActive,
+    tracks,
+    liked,
+    history,
+    mood,
+    onImport: importTracks,
+  })
+  const waveRecommended = useMemo(() => {
+    const fresh = new Set(wave.batch.mood === mood ? wave.batch.ids : [])
+    const discoveries = recommended.filter((track) => fresh.has(track.id))
+    const rest = recommended.filter((track) => !fresh.has(track.id))
+    const ranked = [...discoveries, ...rest]
+    const unheard = ranked.filter((track) => !history.slice(0, 3).includes(track.id))
+    return (unheard.length >= 4 ? unheard : ranked).slice(0, 24)
+  }, [recommended, wave.batch, mood, history])
+
+  // Newly discovered music goes next, without restarting the current song.
+  useEffect(() => {
+    if (!waveActive) return
+    setQueue((previous) => {
+      const index = previous.indexOf(current.id)
+      const past = index >= 0 ? previous.slice(0, index + 1) : [current.id]
+      const pastIds = new Set(past)
+      const fresh = (wave.batch.mood === mood ? wave.batch.ids : []).filter(
+        (id) => !pastIds.has(id),
+      )
+      const freshIds = new Set(fresh)
+      const remaining = previous.slice(index + 1).filter((id) => {
+        const track = tracks.find((item) => item.id === id)
+        return (
+          track &&
+          !pastIds.has(id) &&
+          !freshIds.has(id) &&
+          (mood === 'all' || track.moods.includes(mood))
+        )
+      })
+      return [...past, ...fresh, ...remaining]
+    })
+  }, [wave.batch, waveActive, mood])
+
+  useEffect(() => {
+    if (
+      !waveActive ||
+      wave.loading ||
+      wave.error ||
+      !wave.hasMore ||
+      wave.loadedMood !== mood ||
+      !wave.batch.ids.length
+    )
+      return
+    if (!wave.batch.ids.some((id) => queue.includes(id))) return
+    const index = queue.indexOf(current.id)
+    const nextDiscoveries = queue
+      .slice(index + 1)
+      .filter((id) => tracks.find((track) => track.id === id)?.source === 'archive')
+    if (nextDiscoveries.length <= 3) void wave.refresh()
+  }, [
+    current.id,
+    queue,
+    waveActive,
+    wave.loading,
+    wave.error,
+    wave.hasMore,
+    wave.loadedMood,
+    wave.batch,
+    mood,
+    wave.refresh,
+  ])
   useEffect(() => {
     const previous = audioOverride?.src
     return () => {
@@ -271,8 +344,9 @@ export default function App() {
       previous.includes(id) ? previous.filter((item) => item !== id) : [...previous, id],
     )
   }
-  async function playTrack(track: Track, list?: string[]) {
+  async function playTrack(track: Track, list?: string[], fromWave = false) {
     if (!track) return
+    setWaveActive(fromWave)
     const request = ++playbackRequest.current
     setYoutubeVideo(null)
     let source = track.audio
@@ -305,7 +379,7 @@ export default function App() {
   function togglePlayback() {
     if (!audio.current) return
     if (playing) audio.current.pause()
-    else playTrack(current)
+    else playTrack(current, undefined, waveActive)
   }
   function nextTrack(direction = 1) {
     if (direction === -1 && audio.current && audio.current.currentTime > 3) {
@@ -324,12 +398,23 @@ export default function App() {
     if (next === current.id && audio.current) {
       audio.current.currentTime = 0
       void audio.current.play()
-    } else playTrack(byId(next))
+    } else playTrack(byId(next), undefined, waveActive)
   }
   function playCollection(ids: string[]) {
     if (ids.length) playTrack(byId(ids[0]), ids)
   }
+  function startWave() {
+    if (page !== 'radio') navigate('radio')
+    if (waveRecommended.length)
+      void playTrack(
+        waveRecommended[0],
+        waveRecommended.map((track) => track.id),
+        true,
+      )
+  }
   function playYouTube(video: YouTubeVideo) {
+    setWaveActive(false)
+    playbackRequest.current++
     if (isPortable()) {
       window.open(youtubeUrl(video.id), '_blank', 'noopener,noreferrer')
       notify('Открываем YouTube. Встроенный плеер доступен в серверной версии Volna.')
@@ -496,7 +581,7 @@ export default function App() {
       for (const action of ['play', 'pause', 'previoustrack', 'nexttrack', 'seekto'] as const)
         navigator.mediaSession.setActionHandler(action, null)
     }
-  }, [current.id, playing, shuffle, repeat, queue])
+  }, [current.id, playing, shuffle, repeat, queue, waveActive])
 
   function renderTrackRows(items: Track[], showNumber = true) {
     return (
@@ -525,6 +610,7 @@ export default function App() {
                 playTrack(
                   track,
                   items.map((t) => t.id),
+                  page === 'radio',
                 )
               }
               aria-label={`Слушать ${track.title}`}
@@ -544,6 +630,7 @@ export default function App() {
                 playTrack(
                   track,
                   items.map((t) => t.id),
+                  page === 'radio',
                 )
               }
             >
@@ -997,10 +1084,7 @@ export default function App() {
                   </h2>
                   <p>Твои любимые треки и открытия, которые попадут в самое сердце.</p>
                   <div className="hero-buttons">
-                    <button
-                      className="primary-button"
-                      onClick={() => playCollection(recommended.map((t) => t.id))}
-                    >
+                    <button className="primary-button" onClick={startWave}>
                       <Play size={17} fill="currentColor" /> Слушать мою волну
                     </button>
                     <button
@@ -1075,7 +1159,7 @@ export default function App() {
                       <ArrowRight size={19} />
                     </button>
                   </div>
-                  {renderTrackRows(recommended.slice(0, 4))}
+                  {renderTrackRows(waveRecommended.slice(0, 4))}
                 </section>
                 <section className="section mood-section">
                   <div className="section-heading">
@@ -1137,10 +1221,7 @@ export default function App() {
                   <span className="eyebrow">МУЗЫКА, КОТОРАЯ ЧУВСТВУЕТ</span>
                   <h2>Настроимся на тебя</h2>
                   <p>Рекомендации учитывают избранное, историю и твоё настроение.</p>
-                  <button
-                    className="primary-button"
-                    onClick={() => playCollection(recommended.map((t) => t.id))}
-                  >
+                  <button className="primary-button" onClick={startWave}>
                     <Play size={17} fill="currentColor" /> Включить волну
                   </button>
                 </div>
@@ -1160,10 +1241,48 @@ export default function App() {
                 ))}
               </div>
               <div className="section-heading">
-                <h2>Твоя следующая находка</h2>
-                <span className="muted">{recommended.length} треков</span>
+                <div>
+                  <h2>Твоя следующая находка</h2>
+                  <p>{waveRecommended.length} треков · открытия из открытого каталога</p>
+                </div>
+                <button
+                  className="text-button wave-refresh"
+                  disabled={wave.loading}
+                  onClick={() => void wave.refresh()}
+                >
+                  <RefreshCw size={15} className={wave.loading ? 'spinner' : ''} /> Обновить волну
+                </button>
               </div>
-              {renderTrackRows(recommended)}
+              <div
+                className={`wave-status ${wave.error ? 'wave-error' : ''}`}
+                role={wave.error ? 'alert' : 'status'}
+                aria-live="polite"
+              >
+                {wave.loading ? (
+                  <>
+                    <LoaderCircle size={17} className="spinner" />
+                    <span>Ищем новые треки для твоей волны…</span>
+                  </>
+                ) : wave.error ? (
+                  <>
+                    <span>{wave.error} Сейчас доступны ранее загруженные и встроенные треки.</span>
+                  </>
+                ) : (
+                  wave.loadedMood === mood && (
+                    <>
+                      <Sparkles size={17} />
+                      <span>
+                        {wave.batch.ids.length
+                          ? `${wave.batch.ids.length} новых треков. Во время прослушивания очередь пополняется автоматически.`
+                          : wave.hasMore
+                            ? 'Свежих треков в этой подборке пока нет. Обнови волну, чтобы продолжить поиск.'
+                            : 'Пока новых треков нет. Выбери другое настроение или попробуй позже.'}
+                      </span>
+                    </>
+                  )
+                )}
+              </div>
+              {renderTrackRows(waveRecommended)}
               <div className="recommendation-note">
                 <Sparkles size={18} />
                 <span>
@@ -1401,14 +1520,20 @@ export default function App() {
           </div>
           <div className="queue-next-title">
             <span className="eyebrow">ДАЛЬШЕ</span>
-            <button className="text-button" onClick={() => setQueue([current.id])}>
+            <button
+              className="text-button"
+              onClick={() => {
+                setWaveActive(false)
+                setQueue([current.id])
+              }}
+            >
               Очистить
             </button>
           </div>
           <div className="queue-list">
             {queue.slice(queue.indexOf(current.id) + 1).map((id, index) => (
               <div className="queue-track" key={`${id}-${index}`}>
-                <button onClick={() => playTrack(byId(id))}>
+                <button onClick={() => playTrack(byId(id), undefined, waveActive)}>
                   <Artwork kind={byId(id).artwork} image={byId(id).artworkUrl} />
                   <span>
                     <strong>{byId(id).title}</strong>

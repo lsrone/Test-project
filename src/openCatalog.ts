@@ -130,36 +130,45 @@ export function releaseTracks(release: CatalogRelease, metadata: Record<string, 
     ? ['focus', 'chill']
     : ['energy', 'night']
   const files = Array.isArray(metadata.files) ? (metadata.files as Record<string, unknown>[]) : []
-  return files
-    .filter(
-      (file) =>
-        typeof file.name === 'string' &&
-        /\.mp3$/i.test(file.name) &&
-        file.private !== 'true' &&
-        file.private !== true &&
-        !file.name.split('/').some((part) => part === '..' || part === '.'),
-    )
-    .map((file) => {
-      const name = file.name as string
-      return {
-        id: `archive:${release.id}:${name}`,
-        title: text(file.title) || name.replace(/\.mp3$/i, '').replace(/_/g, ' '),
-        artist: text(file.artist) || text(file.creator) || text(details.creator) || release.artist,
-        genre,
-        cover: 'coast',
-        artwork: 'coast',
-        color: '#7fadb5',
-        audio: `https://archive.org/download/${encodeURIComponent(release.id)}/${name.split('/').map(encodeURIComponent).join('/')}`,
-        duration: parseDuration(file.length || file.duration),
-        moods: mood,
-        source: 'archive' as const,
-        sourceUrl: `https://archive.org/details/${release.id}`,
-        artworkUrl: release.cover,
-        album: release.title,
-        license: text(details.licenseurl) || release.license,
-        downloadAllowed: allowsDownload(text(details.licenseurl) || release.license || ''),
-      }
-    })
+  const publicFiles = files.filter(
+    (file) =>
+      typeof file.name === 'string' &&
+      /\.mp3$/i.test(file.name) &&
+      file.private !== 'true' &&
+      file.private !== true &&
+      !file.name.split('/').some((part) => part === '..' || part === '.'),
+  )
+  // Archive often provides the same recording as both song.mp3 and song_64kb.mp3.
+  const preferred = new Map<string, { file: Record<string, unknown>; quality: number }>()
+  for (const file of publicFiles) {
+    const name = file.name as string
+    const variant = /[_-](?:(\d{2,3})kb(?:ps)?|vbr)\.mp3$/i.exec(name)
+    const key = variant ? name.replace(variant[0], '.mp3') : name
+    const quality = variant ? Number(variant[1]) || 320 : Infinity
+    if (!preferred.has(key) || preferred.get(key)!.quality < quality)
+      preferred.set(key, { file, quality })
+  }
+  return [...preferred.values()].map(({ file }) => {
+    const name = file.name as string
+    return {
+      id: `archive:${release.id}:${name}`,
+      title: text(file.title) || name.replace(/\.mp3$/i, '').replace(/_/g, ' '),
+      artist: text(file.artist) || text(file.creator) || text(details.creator) || release.artist,
+      genre,
+      cover: 'coast',
+      artwork: 'coast',
+      color: '#7fadb5',
+      audio: `https://archive.org/download/${encodeURIComponent(release.id)}/${name.split('/').map(encodeURIComponent).join('/')}`,
+      duration: parseDuration(file.length || file.duration),
+      moods: mood,
+      source: 'archive' as const,
+      sourceUrl: `https://archive.org/details/${release.id}`,
+      artworkUrl: release.cover,
+      album: release.title,
+      license: text(details.licenseurl) || release.license,
+      downloadAllowed: allowsDownload(text(details.licenseurl) || release.license || ''),
+    }
+  })
 }
 
 export async function loadRelease(release: CatalogRelease, signal?: AbortSignal): Promise<Track[]> {

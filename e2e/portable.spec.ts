@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 
 test('portable HTML starts with no external files and plays embedded music in a preview', async ({
   page,
+  context,
 }) => {
   const errors: string[] = []
   const requests: string[] = []
@@ -22,7 +23,10 @@ test('portable HTML starts with no external files and plays embedded music in a 
   await expect(
     app.getByRole('heading', { name: 'Хороший день начинается с музыки.' }),
   ).toBeVisible()
+  expect(requests).toEqual([])
+  await context.setOffline(true)
   await app.getByRole('button', { name: 'Слушать мою волну', exact: true }).click()
+  await expect(app.locator('.wave-status')).toContainText('Нет интернета')
   await expect
     .poll(() => app.locator('audio').evaluate((audio: HTMLAudioElement) => audio.currentTime))
     .toBeGreaterThan(0.1)

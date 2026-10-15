@@ -1628,6 +1628,48 @@ h2 {
   padding: 24px 0;
   margin-top: 20px;
 }
+.wave-refresh {
+  flex-shrink: 0;
+  gap: 7px;
+}
+.wave-refresh:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.wave-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #a7c3f5;
+  background: #1a2944;
+  border: 1px solid #304566;
+  border-radius: 8px;
+  padding: 13px 16px;
+  margin-bottom: 18px;
+  font-size: 11px;
+  line-height: 1.8;
+}
+.wave-status:empty {
+  display: none;
+}
+.wave-status > svg {
+  flex-shrink: 0;
+}
+.wave-status.wave-error {
+  color: #dbc59e;
+  background: #29251f;
+  border-color: #514632;
+}
+@media (max-width: 760px) {
+  .section-heading:has(.wave-refresh) {
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+  .wave-status {
+    padding: 11px 12px;
+    font-size: 10px;
+  }
+}
 .muted {
   font-size: 10px;
   color: #808796;

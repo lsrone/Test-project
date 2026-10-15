@@ -1,5 +1,12 @@
 import { test, expect } from '@playwright/test'
 
+test.beforeEach(async ({ page }) => {
+  // These scenarios exercise the local/offline library; provider discovery has its own tests.
+  await page.route('https://archive.org/advancedsearch.php?**', (route) =>
+    route.fulfill({ status: 503, json: {} }),
+  )
+})
+
 test('plays real audio, seeks, skips and manages the queue', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))

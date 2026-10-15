@@ -70,4 +70,20 @@ describe('public music catalog', () => {
       'ограничен',
     )
   })
+  it('keeps one MP3 quality per recording instead of recommending the same song twice', () => {
+    const result = releaseTracks(release, {
+      files: [
+        { name: 'song_64kb.mp3' },
+        { name: 'song.mp3' },
+        { name: 'other_64kb.mp3' },
+        { name: 'other_128kb.mp3' },
+        { name: 'only_64kb.mp3' },
+      ],
+    })
+    expect(result.map((track) => track.id.split(':').at(-1))).toEqual([
+      'song.mp3',
+      'other_128kb.mp3',
+      'only_64kb.mp3',
+    ])
+  })
 })
