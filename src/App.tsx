@@ -380,7 +380,7 @@ export default function App() {
       audio.current?.pause()
       setYoutubeVideo(null)
       setNowPlaying(false)
-      const text = `${track.artist} ${track.title}`
+      const text = `${track.artist} ${track.title}`.slice(0, 120)
       if (isPortable())
         window.open(
           `https://www.youtube.com/results?search_query=${encodeURIComponent(text)}`,

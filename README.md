@@ -26,7 +26,7 @@ Dev-сервер использует порт `5173`, слушает `0.0.0.0`.
 npm run release:windows
 ```
 
-Для облачной Linux-сборки используй `ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci --cache /tmp/volna-npm-cache`, затем `npm run export:html`, `ELECTRON_BUILDER_CACHE=/tmp/volna-builder-cache npx electron-builder --config electron-builder.json --config.electronDownload.cache=/tmp/volna-electron-cache --win portable --x64` и `python3 scripts/package_release.py --windows`. Кэши находятся в доступном для записи `/tmp`; проверка TLS и контрольных сумм загрузок остаётся включённой. Исходные EXE в `releases/` хранятся через Git LFS. Контрольные суммы готовых файлов находятся в `releases/SHA256SUMS`.
+Для облачной Linux-сборки используй `ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci --cache /tmp/volna-npm-cache`, затем `npm run export:html`, `ELECTRON_BUILDER_CACHE=/tmp/volna-builder-cache npx electron-builder --config electron-builder.json --config.electronDownload.cache=/tmp/volna-electron-cache --win portable --x64` и `python3 scripts/package_release.py --windows`. Кэши находятся в доступном для записи `/tmp`; проверка TLS и контрольных сумм загрузок остаётся включённой. EXE в `releases/` хранится обычным файлом Git и имеет размер менее 100 МиБ. В пакет входят русская и английская локали; браузерные зависимости уже встроены в клиентскую сборку. Контрольные суммы готовых файлов находятся в `releases/SHA256SUMS`.
 
 Проверены сборка Windows PE x64, содержимое пакета и встроенный сервер в Chromium: интерфейс с CSP, настоящее воспроизведение/перемотка, импорт CSV и сохранение после перезапуска страницы. Нативный запуск EXE на Windows в этой Linux-среде не проверялся.
 

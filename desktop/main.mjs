@@ -71,6 +71,8 @@ else {
   })
   app.on('window-all-closed', () => app.quit())
   app.on('before-quit', () => {
-    if (service) void service.close()
+    const closing = service
+    service = undefined
+    if (closing) void closing.close().catch(() => {})
   })
 }
