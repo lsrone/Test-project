@@ -20,9 +20,11 @@ interface Results {
 export function YouTubeLibrary({
   onPlay,
   initialQuery = '',
+  compact = false,
 }: {
   onPlay: (video: YouTubeVideo) => void
   initialQuery?: string
+  compact?: boolean
 }) {
   const [query, setQuery] = useState(initialQuery)
   const [searchedQuery, setSearchedQuery] = useState('')
@@ -33,13 +35,30 @@ export function YouTubeLibrary({
   const request = useRef<AbortController | null>(null)
   const automaticQuery = useRef('')
 
+  useEffect(() => setQuery(initialQuery), [initialQuery])
+
   useEffect(() => {
-    if (configured && initialQuery.trim().length > 1 && automaticQuery.current !== initialQuery) {
-      automaticQuery.current = initialQuery
-      setQuery(initialQuery)
-      void find(initialQuery)
+    request.current?.abort()
+    setLoading(false)
+    if (compact) {
+      setResults({ items: [] })
+      setSearchedQuery('')
+      setError('')
     }
-  }, [configured, initialQuery])
+    if (!configured || initialQuery.trim().length < 2 || isPortable()) return
+    if (!compact && automaticQuery.current === initialQuery) return
+    const timer = setTimeout(
+      () => {
+        automaticQuery.current = initialQuery
+        void find(initialQuery)
+      },
+      compact ? 350 : 0,
+    )
+    return () => {
+      clearTimeout(timer)
+      request.current?.abort()
+    }
+  }, [configured, initialQuery, compact])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -69,6 +88,8 @@ export function YouTubeLibrary({
   }, [])
 
   async function find(text: string, pageToken?: string) {
+    request.current?.abort()
+    setLoading(false)
     const videoId = parseYouTubeId(text)
     if (videoId) {
       setError('')
@@ -91,7 +112,6 @@ export function YouTubeLibrary({
       setError('Поиск приложения недоступен. Можно открыть YouTube или вставить ссылку на видео.')
       return
     }
-    request.current?.abort()
     const controller = new AbortController()
     request.current = controller
     setLoading(true)
@@ -100,6 +120,7 @@ export function YouTubeLibrary({
       const params = new URLSearchParams({ q: text.trim(), ...(pageToken ? { pageToken } : {}) })
       const response = await fetch(`/api/youtube/search?${params}`, { signal: controller.signal })
       const data = await response.json()
+      if (controller.signal.aborted) return
       if (!response.ok)
         throw new Error(data.message || 'YouTube сейчас недоступен. Попробуй ещё раз.')
       if (!Array.isArray(data.items)) throw new Error('Не удалось прочитать ответ YouTube.')
@@ -125,74 +146,88 @@ export function YouTubeLibrary({
 
   return (
     <div className="youtube-library">
-      <div className="page-heading">
-        <div>
-          <div className="eyebrow">
-            <Youtube size={14} /> БОЛЬШЕ МУЗЫКАЛЬНЫХ ОТКРЫТИЙ
+      {!compact && (
+        <>
+          <div className="page-heading">
+            <div>
+              <div className="eyebrow">
+                <Youtube size={14} /> БОЛЬШЕ МУЗЫКАЛЬНЫХ ОТКРЫТИЙ
+              </div>
+              <h1>
+                Весь мир звучит<span className="heading-dot">.</span>
+              </h1>
+              <p>Ищи музыку на YouTube или включай любимое по ссылке.</p>
+            </div>
+            <span className="youtube-source">
+              <Youtube size={17} /> YouTube
+            </span>
           </div>
-          <h1>
-            Весь мир звучит<span className="heading-dot">.</span>
-          </h1>
-          <p>Ищи музыку на YouTube или включай любимое по ссылке.</p>
-        </div>
-        <span className="youtube-source">
-          <Youtube size={17} /> YouTube
-        </span>
-      </div>
-      <section className="youtube-search-hero">
-        <div className="youtube-hero-icon">
-          <Youtube size={37} strokeWidth={1.3} />
-        </div>
-        <div>
-          <h2>Что хочется послушать?</h2>
-          <p>Концерты, новые релизы, длинные миксы и музыка под настроение.</p>
-        </div>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault()
-            void find(query)
-          }}
-        >
-          <div className="youtube-input">
-            <Search size={19} />
-            <input
-              aria-label="Поиск на YouTube или ссылка"
-              value={query}
-              maxLength={500}
-              placeholder="Исполнитель, трек или ссылка на YouTube"
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault()
-                  void find(query)
-                }
-              }}
-            />
-            <button
-              className="primary-button"
-              disabled={loading || configured === null}
-              type="button"
-              onClick={() => void find(query)}
-            >
-              {loading ? <LoaderCircle size={16} className="spinner" /> : <ArrowRight size={17} />}
-              <span>{isPortable() ? 'Открыть YouTube' : 'Найти'}</span>
-            </button>
-          </div>
-        </form>
-        <div className="youtube-search-tags">
-          {['lofi hip hop', 'jazz café', 'ambient music', 'indie live'].map((tag) => (
-            <button
-              key={tag}
-              onClick={() => {
-                setQuery(tag)
-                void find(tag)
+          <section className="youtube-search-hero">
+            <div className="youtube-hero-icon">
+              <Youtube size={37} strokeWidth={1.3} />
+            </div>
+            <div>
+              <h2>Что хочется послушать?</h2>
+              <p>Концерты, новые релизы, длинные миксы и музыка под настроение.</p>
+            </div>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault()
+                void find(query)
               }}
             >
-              {tag}
-            </button>
-          ))}
+              <div className="youtube-input">
+                <Search size={19} />
+                <input
+                  aria-label="Поиск на YouTube или ссылка"
+                  value={query}
+                  maxLength={120}
+                  placeholder="Исполнитель, трек или ссылка на YouTube"
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      void find(query)
+                    }
+                  }}
+                />
+                <button
+                  className="primary-button"
+                  disabled={loading || configured === null}
+                  type="button"
+                  onClick={() => void find(query)}
+                >
+                  {loading ? (
+                    <LoaderCircle size={16} className="spinner" />
+                  ) : (
+                    <ArrowRight size={17} />
+                  )}
+                  <span>{isPortable() ? 'Открыть YouTube' : 'Найти'}</span>
+                </button>
+              </div>
+            </form>
+            <div className="youtube-search-tags">
+              {['lofi hip hop', 'jazz café', 'ambient music', 'indie live'].map((tag) => (
+                <button
+                  key={tag}
+                  onClick={() => {
+                    setQuery(tag)
+                    void find(tag)
+                  }}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          </section>
+        </>
+      )}
+      {loading && (
+        <div className="youtube-search-loading" role="status">
+          <LoaderCircle size={18} className="spinner" />
+          {results.items.length ? 'Загружаем ещё…' : 'Ищем на YouTube…'}
         </div>
-      </section>
+      )}
       {error && (
         <div className="youtube-message" role="alert">
           <CircleAlert size={19} />
@@ -239,9 +274,16 @@ export function YouTubeLibrary({
             <span className="muted">{results.items.length} видео</span>
           </div>
           {results.items.length ? (
-            <div className="youtube-results">
-              {results.items.map((video) => (
-                <article className="youtube-result" key={video.id}>
+            <ol
+              className="youtube-results"
+              aria-label="Результаты поиска YouTube"
+              aria-busy={loading}
+            >
+              {results.items.map((video, index) => (
+                <li className="youtube-result" key={video.id}>
+                  <span className="youtube-result-number" aria-hidden="true">
+                    {index + 1}
+                  </span>
                   <button
                     className="youtube-result-art"
                     aria-label={`Включить ${video.title}`}
@@ -262,13 +304,22 @@ export function YouTubeLibrary({
                       <Youtube size={15} />
                     </small>
                   </button>
-                  <button className="youtube-result-title" onClick={() => onPlay(video)}>
-                    {video.title}
+                  <div className="youtube-result-info">
+                    <button className="youtube-result-title" onClick={() => onPlay(video)}>
+                      {video.title}
+                    </button>
+                    <p>{video.channel}</p>
+                  </div>
+                  <button
+                    className="youtube-result-play icon-button"
+                    aria-label={`Слушать ${video.title}`}
+                    onClick={() => onPlay(video)}
+                  >
+                    <Play size={18} fill="currentColor" />
                   </button>
-                  <p>{video.channel}</p>
-                </article>
+                </li>
               ))}
-            </div>
+            </ol>
           ) : (
             <div className="empty-state">
               <Search size={40} />
@@ -287,7 +338,7 @@ export function YouTubeLibrary({
           )}
         </section>
       )}
-      {!searchedQuery && (
+      {!searchedQuery && !loading && (
         <div className="youtube-empty-hint">
           <HeadphoneMark />
           <h2>Музыки хватит на любую волну</h2>

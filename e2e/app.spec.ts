@@ -35,6 +35,7 @@ test('searches, saves favorites, creates playlists and persists changes', async 
   await page.goto('/')
   const search = page.getByRole('textbox', { name: 'Поиск музыки' })
   await search.fill('Neon')
+  await page.getByRole('tab', { name: 'В библиотеке' }).click()
   await expect(page.locator('.track-row')).toHaveCount(1)
   await page.getByRole('button', { name: 'Добавить Neon Dreams в избранное', exact: true }).click()
   await page.getByRole('button', { name: 'Создать плейлист', exact: true }).click()
@@ -63,6 +64,7 @@ test('searches, saves favorites, creates playlists and persists changes', async 
     .click()
   await expect(page.locator('.track-info strong')).toHaveText('Neon Dreams')
   await search.fill('zzzzzz')
+  await page.getByRole('tab', { name: 'В библиотеке' }).click()
   await expect(page.getByRole('heading', { name: 'Кажется, здесь пока тихо' })).toBeVisible()
 })
 

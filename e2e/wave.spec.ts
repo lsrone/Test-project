@@ -107,6 +107,7 @@ test('discovers 120 distinct tracks across catalogue pages, persists them, and p
   }
   expect([...requestedPages]).toEqual([1, 2, 3])
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('Discovery focus-')
+  await page.getByRole('tab', { name: 'В библиотеке' }).click()
   await expect(page.locator('.track-row')).toHaveCount(120)
   await page.getByRole('button', { name: 'Слушать Discovery focus-59-1', exact: true }).click()
   await expect
@@ -119,6 +120,7 @@ test('discovers 120 distinct tracks across catalogue pages, persists them, and p
   await expect(page.locator('.queue-track')).toHaveCount(119)
   await page.reload()
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('Discovery focus-')
+  await page.getByRole('tab', { name: 'В библиотеке' }).click()
   await expect(page.locator('.track-row')).toHaveCount(120)
 })
 

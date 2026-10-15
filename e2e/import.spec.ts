@@ -54,6 +54,7 @@ test('imports 128 CSV tracks, merges repeated imports, persists playlists and fa
   ).toBe(2)
   await page.reload()
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('My track')
+  await page.getByRole('tab', { name: 'В библиотеке' }).click()
   await expect(page.locator('.track-row')).toHaveCount(128)
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('My track 127')
   await page.getByRole('button', { name: 'Найти My track 127 на YouTube', exact: true }).click()

@@ -358,8 +358,8 @@ h2 {
   display: flex;
   align-items: center;
   gap: 10px;
-  width: 340px;
-  max-width: 36%;
+  width: 420px;
+  max-width: 55%;
   margin-left: auto;
   border: 1px solid #2a2b32;
   background: #1b1c21;
@@ -397,64 +397,6 @@ h2 {
   display: flex;
   color: #a2a7b8;
   padding: 0;
-}
-.topbar-right {
-  display: flex;
-  align-items: center;
-  gap: 21px;
-  margin-left: 13px;
-}
-.notification-button {
-  color: #a1a5b1;
-}
-.notification-button i {
-  position: absolute;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: #7599f9;
-  right: 6px;
-  top: 4px;
-  border: 1px solid #111215;
-}
-.profile-wrap {
-  position: relative;
-}
-.profile-button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  text-align: left;
-  padding: 0;
-}
-.avatar {
-  background: linear-gradient(140deg, #b2b5b9, #666f6e);
-  border-radius: 50%;
-  width: 33px;
-  height: 33px;
-  font-size: 14px;
-  font-weight: 650;
-  color: #21252c;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 3px solid #3a414a;
-  box-shadow: 0 0 0 1px #535a61;
-}
-.profile-name {
-  font-size: 10px;
-  font-weight: 500;
-}
-.profile-name > span {
-  display: block;
-  font-size: 8px;
-  color: #787b87;
-  margin-top: 4px;
-  font-weight: 400;
-}
-.profile-button > svg {
-  color: #7a7e8b;
-  margin-left: 8px;
 }
 .main-content {
   padding: 31px 36px 0;
@@ -2227,26 +2169,6 @@ h2 {
   z-index: 50;
   cursor: default;
 }
-.profile-menu {
-  top: 48px;
-  right: 0;
-  width: 252px;
-  padding: 14px 8px 8px;
-}
-.profile-menu > strong {
-  display: block;
-  font-size: 12px;
-  font-weight: 500;
-  padding: 0 8px;
-}
-.profile-menu > small {
-  display: block;
-  font-size: 9px;
-  color: #8797b5;
-  padding: 8px 8px 15px;
-  border-bottom: 1px solid #3a4256;
-  margin-bottom: 6px;
-}
 .modal-backdrop {
   position: fixed;
   z-index: 90;
@@ -2615,10 +2537,6 @@ h2 {
     max-width: 50%;
     width: 320px;
   }
-  .topbar-right {
-    margin-left: auto;
-    gap: 11px;
-  }
   .date-badge {
     display: none;
   }
@@ -2723,19 +2641,9 @@ h2 {
   .main-content {
     padding: 25px 23px 0;
   }
-  .profile-name {
-    display: none;
-  }
-  .profile-button > svg {
-    margin-left: 0;
-  }
   .search-box {
     max-width: 65%;
     flex: 1;
-  }
-  .topbar-right {
-    gap: 9px;
-    margin-left: 8px;
   }
   .page-heading h1 {
     font-size: 23px;
@@ -2874,7 +2782,7 @@ h2 {
   .search-box {
     width: 100%;
     margin-left: auto;
-    max-width: 47%;
+    max-width: 70%;
     padding: 10px;
     gap: 7px;
   }
@@ -2883,20 +2791,6 @@ h2 {
   }
   .search-box kbd {
     display: none;
-  }
-  .profile-button > .avatar {
-    width: 30px;
-    height: 30px;
-    font-size: 12px;
-  }
-  .profile-button > svg {
-    display: none;
-  }
-  .notification-button {
-    display: none;
-  }
-  .topbar-right {
-    margin: 0;
   }
   .main-content {
     padding: 25px 20px 0;
@@ -3410,12 +3304,6 @@ h2 {
 .topbar-page {
   font-size: 12px;
 }
-.profile-name {
-  font-size: 11px;
-}
-.profile-name > span {
-  font-size: 9px;
-}
 .page-heading p {
   font-size: 12px;
 }
@@ -3658,10 +3546,6 @@ h2 {
     font-size: 9px;
     padding: 8px 11px;
   }
-  .profile-button > .avatar {
-    height: 27px;
-    width: 27px;
-  }
   .hero-buttons {
     gap: 7px;
   }
@@ -3844,12 +3728,49 @@ h2 {
   margin-top: 24px;
 }
 .youtube-results {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 26px 20px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border: 1px solid #293142;
+  border-radius: 12px;
+  overflow: hidden;
 }
 .youtube-result {
   min-width: 0;
+  display: grid;
+  grid-template-columns: 24px 96px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 18px;
+  background: #151b27;
+}
+.youtube-result + .youtube-result {
+  border-top: 1px solid #293142;
+}
+.youtube-result:hover,
+.youtube-result:focus-within {
+  background: #1c2940;
+}
+.youtube-result-number {
+  color: #8392ad;
+  font-size: 12px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.youtube-result-info {
+  min-width: 0;
+}
+.youtube-result-play {
+  color: #9abbff;
+  background: #334c7a55;
+}
+.youtube-search-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #9abbff;
+  padding: 22px 0;
+  font-size: 12px;
 }
 .youtube-result-art {
   width: 100%;
@@ -3890,11 +3811,11 @@ h2 {
   color: #e8edfa;
 }
 .youtube-result-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   line-height: 1.7;
   text-align: left;
-  padding: 11px 0 0;
+  padding: 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -3904,7 +3825,7 @@ h2 {
   color: #9abbff;
 }
 .youtube-result p {
-  font-size: 10px;
+  font-size: 11px;
   color: #8392ad;
   margin-top: 6px;
 }
@@ -3976,9 +3897,6 @@ h2 {
   animation: spin 1.4s linear infinite;
 }
 @media (max-width: 1000px) {
-  .youtube-results {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
   .youtube-search-hero {
     padding: 24px;
   }
@@ -4036,8 +3954,20 @@ h2 {
     font-size: 8px;
     padding: 5px 9px;
   }
-  .youtube-results {
-    gap: 20px 12px;
+  .youtube-result {
+    grid-template-columns: 64px minmax(0, 1fr) 32px;
+    gap: 10px;
+    padding: 12px 10px;
+  }
+  .youtube-result-number {
+    display: none;
+  }
+  .youtube-result-play {
+    width: 32px;
+    height: 32px;
+  }
+  .youtube-result-art > small {
+    display: none;
   }
   .youtube-result-title {
     font-size: 10px;
@@ -4369,6 +4299,33 @@ h2 {
   align-items: center;
   gap: 20px;
   margin: 22px 0 30px;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+.search-source-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #293142;
+  border-radius: 10px;
+  background: #151b27;
+}
+.search-source-tabs button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 7px;
+  color: #94a1ba;
+  font-size: 12px;
+}
+.search-source-tabs button[aria-selected='true'] {
+  background: #2d559b;
+  color: #fff;
+}
+.search-source-tabs button:hover {
+  color: #fff;
 }
 .context-menu > a {
   display: flex;

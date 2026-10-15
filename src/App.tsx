@@ -3,7 +3,6 @@ import {
   ArrowDownToLine,
   ArrowRight,
   AudioLines,
-  Bell,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -15,6 +14,7 @@ import {
   Heart,
   Home,
   ListMusic,
+  Library,
   LoaderCircle,
   Maximize2,
   MoreHorizontal,
@@ -129,6 +129,7 @@ export default function App() {
   const route = routes[routeIndex]
   const page = route.page
   const [query, setQuery] = useState('')
+  const [searchSource, setSearchSource] = useState<'youtube' | 'library'>('youtube')
   const [tab, setTab] = useState('Все')
   const [mood, setMood] = useState<Mood>('all')
   const [liked, setLiked] = useStoredState<string[]>('volna.liked', [])
@@ -164,7 +165,6 @@ export default function App() {
   const [repeat, setRepeat] = useState(false)
   const [queueOpen, setQueueOpen] = useState(false)
   const [nowPlaying, setNowPlaying] = useState(false)
-  const [profileOpen, setProfileOpen] = useState(false)
   const [dialog, setDialog] = useState<'create' | 'about' | 'add' | null>(null)
   const [newPlaylistName, setNewPlaylistName] = useState('')
   const [menuTrack, setMenuTrack] = useState<string | null>(null)
@@ -360,7 +360,6 @@ export default function App() {
   function navigate(next: Page, playlistId?: string) {
     setRoutes((previous) => [...previous.slice(0, routeIndex + 1), { page: next, playlistId }])
     setRouteIndex(routeIndex + 1)
-    setProfileOpen(false)
     setMenuTrack(null)
     main.current?.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -501,7 +500,6 @@ export default function App() {
     notify('Трек добавлен в плейлист')
   }
   async function install() {
-    setProfileOpen(false)
     if (location.protocol === 'file:' || document.documentElement.dataset.portable === 'true') {
       notify(
         'Этот HTML уже работает автономно. Для установки приложения открой серверную версию Volna.',
@@ -557,7 +555,6 @@ export default function App() {
         setDialog(null)
         setNowPlaying(false)
         setQueueOpen(false)
-        setProfileOpen(false)
         setMenuTrack(null)
       }
     }
@@ -570,7 +567,6 @@ export default function App() {
         setDialog(null)
         setNowPlaying(false)
         setMenuTrack(null)
-        setProfileOpen(false)
       }
     }
     window.addEventListener('keydown', escape)
@@ -1004,7 +1000,12 @@ export default function App() {
             <input
               ref={search}
               aria-label="Поиск музыки"
-              placeholder="Треки, исполнители, настроение"
+              placeholder={
+                page === 'search' && searchSource === 'library'
+                  ? 'Поиск в библиотеке'
+                  : 'Поиск на YouTube'
+              }
+              maxLength={120}
               value={query}
               onFocus={() => {
                 if (query && page !== 'search') navigate('search')
@@ -1027,59 +1028,6 @@ export default function App() {
             ) : (
               <kbd>⌘ K</kbd>
             )}
-          </div>
-          <div className="topbar-right">
-            <button
-              className="notification-button icon-button"
-              aria-label="Открыть новости"
-              onClick={() =>
-                notify(
-                  'Ты на своей волне! В каталоге 8 инструментальных треков — попробуй открыть что-то новое.',
-                )
-              }
-            >
-              <Bell size={20} />
-              <i />
-            </button>
-            <div className="profile-wrap">
-              <button
-                className="profile-button"
-                onClick={() => setProfileOpen(!profileOpen)}
-                aria-label="Меню профиля"
-                aria-expanded={profileOpen}
-              >
-                <span className="avatar">А</span>
-                <span className="profile-name">
-                  Алекс<span>Личный профиль</span>
-                </span>
-                <ChevronDown size={14} />
-              </button>
-              {profileOpen && (
-                <>
-                  <button
-                    className="menu-dismiss"
-                    aria-label="Закрыть меню профиля"
-                    onClick={() => setProfileOpen(false)}
-                  />
-                  <div className="profile-menu context-menu">
-                    <strong>Твоя музыка. Твои правила.</strong>
-                    <small>Профиль хранится на этом устройстве</small>
-                    <button onClick={() => void install()}>
-                      <ArrowDownToLine size={16} />
-                      Установить приложение
-                    </button>
-                    <button
-                      onClick={() => {
-                        setDialog('about')
-                        setProfileOpen(false)
-                      }}
-                    >
-                      <Headphones size={16} />О приложении
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
           </div>
         </header>
 
@@ -1371,48 +1319,99 @@ export default function App() {
                     <span className="heading-dot">.</span>
                   </h1>
                   <p>
-                    {query
-                      ? `Результаты по запросу «${query}»`
-                      : 'Ищи по названию, исполнителю или жанру.'}
+                    {searchSource === 'youtube'
+                      ? 'Ищи треки и исполнителей на YouTube.'
+                      : 'Ищи среди добавленных треков и скачанной музыки.'}
                   </p>
                 </div>
               </div>
               <div className="search-online-actions">
-                <button className="primary-button" onClick={() => openCatalog(query)}>
-                  Искать в онлайн-каталоге <ArrowRight size={16} />
-                </button>
-                <button className="text-button" onClick={() => openYouTube(query)}>
-                  Искать на YouTube <Youtube size={16} />
-                </button>
-              </div>
-              {!query && (
-                <div className="search-suggestions">
-                  {['Электроника', 'Лоу-фай', 'Эмбиент', 'Хаус'].map((item) => (
-                    <button key={item} onClick={() => setQuery(item)}>
-                      <Search size={15} />
-                      {item}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {searchResults.length ? (
-                <>
-                  <div className="section-heading">
-                    <h2>Треки</h2>
-                    <span className="muted">{searchResults.length} найдено</span>
-                  </div>
-                  {renderTrackRows(searchResults)}
-                </>
-              ) : (
-                <div className="empty-state">
-                  <Search size={44} strokeWidth={1} />
-                  <h2>Кажется, здесь пока тихо</h2>
-                  <p>Попробуй другое название или найди что-то по жанру.</p>
-                  <button className="primary-button" onClick={() => setQuery('')}>
-                    Показать весь каталог
+                <div
+                  className="search-source-tabs"
+                  role="tablist"
+                  aria-label="Источник поиска"
+                  onKeyDown={(event) => {
+                    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+                    event.preventDefault()
+                    const index =
+                      event.key === 'Home'
+                        ? 0
+                        : event.key === 'End'
+                          ? 1
+                          : searchSource === 'youtube'
+                            ? 1
+                            : 0
+                    setSearchSource(index === 0 ? 'youtube' : 'library')
+                    event.currentTarget.querySelectorAll('button')[index]?.focus()
+                  }}
+                >
+                  <button
+                    id="search-youtube-tab"
+                    role="tab"
+                    aria-controls="search-results"
+                    aria-selected={searchSource === 'youtube'}
+                    tabIndex={searchSource === 'youtube' ? 0 : -1}
+                    onClick={() => setSearchSource('youtube')}
+                  >
+                    <Youtube size={16} /> YouTube
+                  </button>
+                  <button
+                    id="search-library-tab"
+                    role="tab"
+                    aria-controls="search-results"
+                    aria-selected={searchSource === 'library'}
+                    tabIndex={searchSource === 'library' ? 0 : -1}
+                    onClick={() => setSearchSource('library')}
+                  >
+                    <Library size={16} /> В библиотеке
                   </button>
                 </div>
-              )}
+                <button className="text-button" onClick={() => openCatalog(query)}>
+                  Онлайн-каталог <ArrowRight size={16} />
+                </button>
+              </div>
+              <div
+                id="search-results"
+                role="tabpanel"
+                aria-labelledby={
+                  searchSource === 'youtube' ? 'search-youtube-tab' : 'search-library-tab'
+                }
+              >
+                {searchSource === 'youtube' ? (
+                  <YouTubeLibrary compact initialQuery={query} onPlay={playYouTube} />
+                ) : (
+                  <>
+                    {!query && (
+                      <div className="search-suggestions">
+                        {['Электроника', 'Лоу-фай', 'Эмбиент', 'Хаус'].map((item) => (
+                          <button key={item} onClick={() => setQuery(item)}>
+                            <Search size={15} />
+                            {item}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {searchResults.length ? (
+                      <>
+                        <div className="section-heading">
+                          <h2>Треки</h2>
+                          <span className="muted">{searchResults.length} найдено</span>
+                        </div>
+                        {renderTrackRows(searchResults)}
+                      </>
+                    ) : (
+                      <div className="empty-state">
+                        <Search size={44} strokeWidth={1} />
+                        <h2>Кажется, здесь пока тихо</h2>
+                        <p>Попробуй другое название или найди что-то по жанру.</p>
+                        <button className="primary-button" onClick={() => setQuery('')}>
+                          Показать весь каталог
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
             </>
           )}
 

@@ -3,6 +3,67 @@ import { test, expect } from '@playwright/test'
 // Route fixtures must reach the browser request rather than a service-worker fetch.
 test.use({ serviceWorkers: 'block' })
 
+test('global search defaults to YouTube, displays rows, updates the query and switches to the local library', async ({
+  page,
+}) => {
+  const queries: string[] = []
+  await page.route('**/api/youtube/status', (route) =>
+    route.fulfill({ json: { configured: true } }),
+  )
+  await page.route('**/api/youtube/search?**', (route) => {
+    const query = new URL(route.request().url()).searchParams.get('q')!
+    queries.push(query)
+    return route.fulfill({
+      json: {
+        items: [
+          {
+            id: 'jfKfPfyJRdk',
+            title: `${query} — first recording`,
+            channel: 'First music channel',
+          },
+          {
+            id: '4xDzrJKXOOY',
+            title: `${query} — second recording`,
+            channel: 'Second music channel',
+          },
+        ],
+      },
+    })
+  })
+  await page.goto('/')
+  const search = page.getByRole('textbox', { name: 'Поиск музыки' })
+  await search.fill('Neon')
+  await expect(page.getByRole('tab', { name: 'YouTube', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  const list = page.getByRole('list', { name: 'Результаты поиска YouTube' })
+  await expect(list.getByRole('listitem')).toHaveCount(2)
+  await expect(list).toContainText('First music channel')
+  const rows = await list.getByRole('listitem').evaluateAll((items) =>
+    items.map((item) => {
+      const { x, y, width, bottom } = item.getBoundingClientRect()
+      return { x, y, width, bottom }
+    }),
+  )
+  expect(rows[0].x).toBe(rows[1].x)
+  expect(rows[0].width).toBe(rows[1].width)
+  expect(rows[1].y).toBeGreaterThanOrEqual(rows[0].bottom)
+  await search.fill('Ambient')
+  await expect(list).toContainText('Ambient — first recording')
+  await expect(list).not.toContainText('Neon — first recording')
+  await search.fill('Neon')
+  await page.getByRole('tab', { name: 'В библиотеке' }).click()
+  await expect(page.locator('.track-row')).toHaveCount(1)
+  await expect(page.locator('.track-info strong')).toHaveText('Neon Dreams')
+  await expect(list).toHaveCount(0)
+  await page.getByRole('tab', { name: 'В библиотеке' }).press('ArrowLeft')
+  await expect(list.getByRole('listitem')).toHaveCount(2)
+  await page.getByRole('button', { name: 'Очистить поиск' }).click()
+  await expect(list).toHaveCount(0)
+  expect(queries).toContain('Ambient')
+})
+
 test('YouTube search renders paginated API results and pauses local music for the official embed', async ({
   page,
 }) => {

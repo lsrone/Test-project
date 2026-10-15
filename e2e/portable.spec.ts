@@ -31,6 +31,7 @@ test('portable HTML starts with no external files and plays embedded music in a 
     .poll(() => app.locator('audio').evaluate((audio: HTMLAudioElement) => audio.currentTime))
     .toBeGreaterThan(0.1)
   await app.getByRole('textbox', { name: 'Поиск музыки' }).fill('Neon')
+  await app.getByRole('tab', { name: 'В библиотеке' }).click()
   await expect(app.locator('.track-row')).toHaveCount(1)
   await app.getByRole('button', { name: 'Создать плейлист', exact: true }).click()
   await app.getByRole('textbox', { name: 'Название', exact: true }).fill('Автономный плейлист')
