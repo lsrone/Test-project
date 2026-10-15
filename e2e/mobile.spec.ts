@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { mockYouTubePlayback } from './youtube-fixture'
 
 // Keep provider fixtures outside the production service worker's fetch handler.
 test.use({ serviceWorkers: 'block' })
@@ -21,9 +22,7 @@ test('mobile global search shows YouTube results as a list without overflow', as
       },
     }),
   )
-  await page.route('https://www.youtube-nocookie.com/**', (route) =>
-    route.fulfill({ contentType: 'text/html', body: '<p>Embed fixture</p>' }),
-  )
+  await mockYouTubePlayback(page)
   await page.goto('/')
   await page.locator('.mobile-nav').getByRole('button', { name: 'Поиск', exact: true }).click()
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('Музыка')
@@ -31,7 +30,10 @@ test('mobile global search shows YouTube results as a list without overflow', as
   await expect(list.getByRole('listitem')).toHaveCount(2)
   expect(await page.evaluate(() => document.body.scrollWidth <= innerWidth)).toBe(true)
   await page.getByRole('button', { name: 'Слушать Ещё одна запись', exact: true }).click()
-  await expect(page.locator('.youtube-dock iframe')).toHaveAttribute('src', /embed\/4xDzrJKXOOY/)
+  await expect(page.locator('.player-youtube iframe')).toHaveAttribute('src', /embed\/4xDzrJKXOOY/)
+  await expect(page.getByRole('button', { name: 'Пауза', exact: true })).toBeVisible()
+  await expect(page.locator('.player-track-info strong')).toHaveText('Ещё одна запись')
+  expect(await page.evaluate(() => document.body.scrollWidth <= innerWidth)).toBe(true)
 })
 
 test('mobile collection imports a CSV library without horizontal overflow', async ({ page }) => {

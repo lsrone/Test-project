@@ -19,7 +19,7 @@ const MIME = {
   '.mp3': 'audio/mpeg',
 }
 const CSP =
-  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https://archive.org https://*.archive.org https://i.ytimg.com; media-src 'self' blob: https://archive.org https://*.archive.org; connect-src 'self' https://archive.org https://*.archive.org; frame-src https://www.youtube-nocookie.com https://www.youtube.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+  "default-src 'self'; script-src 'self' https://www.youtube.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https://archive.org https://*.archive.org https://i.ytimg.com; media-src 'self' blob: https://archive.org https://*.archive.org; connect-src 'self' https://archive.org https://*.archive.org; frame-src https://www.youtube-nocookie.com https://www.youtube.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
 
 export async function startAppServer({ root, port = 28741, youtubeApi = createYouTubeApi() }) {
   const directory = resolve(root)

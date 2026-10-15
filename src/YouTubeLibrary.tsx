@@ -3,14 +3,16 @@ import {
   ArrowRight,
   CircleAlert,
   ExternalLink,
+  Heart,
   Link2,
   LoaderCircle,
   Play,
+  Plus,
   Search,
   X,
   Youtube,
 } from 'lucide-react'
-import { isPortable, parseYouTubeId, youtubeUrl, type YouTubeVideo } from './youtube'
+import { isPortable, parseYouTubeId, type YouTubeVideo } from './youtube'
 
 interface Results {
   items: YouTubeVideo[]
@@ -21,8 +23,14 @@ export function YouTubeLibrary({
   onPlay,
   initialQuery = '',
   compact = false,
+  onSave,
+  liked = [],
+  onResults,
 }: {
-  onPlay: (video: YouTubeVideo) => void
+  onPlay: (video: YouTubeVideo, results?: YouTubeVideo[]) => void
+  onSave?: (video: YouTubeVideo, playlist?: boolean) => void
+  liked?: string[]
+  onResults?: (items: YouTubeVideo[]) => void
   initialQuery?: string
   compact?: boolean
 }) {
@@ -34,6 +42,10 @@ export function YouTubeLibrary({
   const [error, setError] = useState('')
   const request = useRef<AbortController | null>(null)
   const automaticQuery = useRef('')
+
+  useEffect(() => {
+    if (results.items.length) onResults?.(results.items)
+  }, [results.items])
 
   useEffect(() => setQuery(initialQuery), [initialQuery])
 
@@ -287,7 +299,7 @@ export function YouTubeLibrary({
                   <button
                     className="youtube-result-art"
                     aria-label={`Включить ${video.title}`}
-                    onClick={() => onPlay(video)}
+                    onClick={() => onPlay(video, results.items)}
                   >
                     <img
                       src={video.thumbnail}
@@ -305,18 +317,45 @@ export function YouTubeLibrary({
                     </small>
                   </button>
                   <div className="youtube-result-info">
-                    <button className="youtube-result-title" onClick={() => onPlay(video)}>
+                    <button
+                      className="youtube-result-title"
+                      onClick={() => onPlay(video, results.items)}
+                    >
                       {video.title}
                     </button>
                     <p>{video.channel}</p>
                   </div>
-                  <button
-                    className="youtube-result-play icon-button"
-                    aria-label={`Слушать ${video.title}`}
-                    onClick={() => onPlay(video)}
-                  >
-                    <Play size={18} fill="currentColor" />
-                  </button>
+                  <div className="youtube-result-actions">
+                    {onSave && (
+                      <>
+                        <button
+                          className={`icon-button ${liked.includes(`youtube:${video.id}`) ? 'active' : ''}`}
+                          aria-label={`${liked.includes(`youtube:${video.id}`) ? 'Убрать' : 'Добавить'} ${video.title} ${liked.includes(`youtube:${video.id}`) ? 'из избранного' : 'в избранное'}`}
+                          aria-pressed={liked.includes(`youtube:${video.id}`)}
+                          onClick={() => onSave(video)}
+                        >
+                          <Heart
+                            size={17}
+                            fill={liked.includes(`youtube:${video.id}`) ? 'currentColor' : 'none'}
+                          />
+                        </button>
+                        <button
+                          className="icon-button"
+                          aria-label={`Добавить ${video.title} в плейлист`}
+                          onClick={() => onSave(video, true)}
+                        >
+                          <Plus size={17} />
+                        </button>
+                      </>
+                    )}
+                    <button
+                      className="youtube-result-play icon-button"
+                      aria-label={`Слушать ${video.title}`}
+                      onClick={() => onPlay(video, results.items)}
+                    >
+                      <Play size={18} fill="currentColor" />
+                    </button>
+                  </div>
                 </li>
               ))}
             </ol>
@@ -362,32 +401,4 @@ function PlusIcon() {
 }
 function HeadphoneMark() {
   return <Youtube size={44} strokeWidth={1} />
-}
-
-export function YouTubePlayer({ video, onClose }: { video: YouTubeVideo; onClose: () => void }) {
-  return (
-    <aside className="youtube-dock" aria-label="Плеер YouTube">
-      <div className="youtube-dock-heading">
-        <Youtube size={19} />
-        <span>
-          <strong>{video.title}</strong>
-          <small>{video.channel}</small>
-        </span>
-        <button className="icon-button" aria-label="Закрыть плеер YouTube" onClick={onClose}>
-          <X size={19} />
-        </button>
-      </div>
-      <iframe
-        key={video.id}
-        title={`YouTube: ${video.title}`}
-        src={`https://www.youtube-nocookie.com/embed/${encodeURIComponent(video.id)}?autoplay=1&playsinline=1&rel=0`}
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-        allowFullScreen
-        referrerPolicy="strict-origin-when-cross-origin"
-      />
-      <a href={youtubeUrl(video.id)} target="_blank" rel="noopener noreferrer">
-        Открыть на YouTube <ExternalLink size={12} />
-      </a>
-    </aside>
-  )
 }

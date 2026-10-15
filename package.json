@@ -1,7 +1,7 @@
 {
   "name": "volna-music",
   "private": true,
-  "version": "1.1.1",
+  "version": "1.1.2",
   "type": "module",
   "main": "desktop/main.mjs",
   "description": "Volna music player with personal discovery and library import",

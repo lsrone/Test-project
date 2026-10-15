@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { mockYouTubePlayback } from './youtube-fixture'
 
 test.use({ serviceWorkers: 'block' })
 
@@ -27,9 +28,7 @@ test('imports 128 CSV tracks, merges repeated imports, persists playlists and fa
       },
     })
   })
-  await page.route('https://www.youtube-nocookie.com/**', (route) =>
-    route.fulfill({ contentType: 'text/html', body: '<p>Official player fixture</p>' }),
-  )
+  await mockYouTubePlayback(page)
   await page.goto('/')
   await page.getByRole('button', { name: 'Перенести библиотеку', exact: true }).click()
   await page.getByLabel('Файл экспорта Яндекс Музыки').setInputFiles(upload)
@@ -60,7 +59,7 @@ test('imports 128 CSV tracks, merges repeated imports, persists playlists and fa
   await page.getByRole('button', { name: 'Найти My track 127 на YouTube', exact: true }).click()
   await expect(page.locator('.youtube-result')).toHaveCount(1)
   await page.getByRole('button', { name: 'Включить Matched imported recording' }).click()
-  await expect(page.locator('.youtube-dock iframe')).toHaveAttribute(
+  await expect(page.locator('.player-youtube iframe')).toHaveAttribute(
     'src',
     /youtube-nocookie\.com\/embed\/jfKfPfyJRdk/,
   )
@@ -91,13 +90,11 @@ test('imports nested JSON playlists and favourites, then rejects an ID-only file
   }
   await page.goto('/')
   await page.getByRole('button', { name: 'Перенести библиотеку', exact: true }).click()
-  await page
-    .getByLabel('Файл экспорта Яндекс Музыки')
-    .setInputFiles({
-      name: 'yandex-export.json',
-      mimeType: 'application/json',
-      buffer: Buffer.from(JSON.stringify(json)),
-    })
+  await page.getByLabel('Файл экспорта Яндекс Музыки').setInputFiles({
+    name: 'yandex-export.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(json)),
+  })
   await page.getByRole('button', { name: 'Перенести 2 треков', exact: true }).click()
   await page.getByRole('button', { name: 'Открыть перенесённую коллекцию' }).click()
   await expect(page.getByRole('heading', { name: 'Ночь', exact: true })).toBeVisible()
@@ -108,13 +105,11 @@ test('imports nested JSON playlists and favourites, then rejects an ID-only file
     .click()
   await expect(page.locator('.track-info strong')).toHaveText('Ночной рейс')
   await page.getByRole('button', { name: 'Перенести библиотеку', exact: true }).first().click()
-  await page
-    .getByLabel('Файл экспорта Яндекс Музыки')
-    .setInputFiles({
-      name: 'ids.json',
-      mimeType: 'application/json',
-      buffer: Buffer.from('{"tracks":[{"id":123}]}'),
-    })
+  await page.getByLabel('Файл экспорта Яндекс Музыки').setInputFiles({
+    name: 'ids.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from('{"tracks":[{"id":123}]}'),
+  })
   await expect(page.getByRole('alert')).toContainText('полные метаданные')
   expect(
     await page.evaluate(
