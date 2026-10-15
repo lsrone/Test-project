@@ -1,0 +1,32 @@
+{
+  "name": "volna-music",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -b && vite build && node scripts/build-sw.mjs",
+    "export:html": "npm run build && node scripts/export-portable.mjs",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "format": "prettier --write src server e2e scripts/*.mjs *.ts *.json index.html public/manifest.webmanifest README.md"
+  },
+  "dependencies": {
+    "@fontsource/manrope": "^5.3.0",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.5.0",
+    "prettier": "^3.6.2",
+    "typescript": "~5.8.3",
+    "undici": "^6.21.3",
+    "vite": "^6.3.0",
+    "vitest": "^3.2.0"
+  }
+}

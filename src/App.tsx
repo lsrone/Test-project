@@ -1,0 +1,1585 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  ArrowDownToLine,
+  ArrowRight,
+  AudioLines,
+  Bell,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  Compass,
+  Headphones,
+  Heart,
+  Home,
+  ListMusic,
+  LoaderCircle,
+  Maximize2,
+  MoreHorizontal,
+  Music2,
+  Pause,
+  Play,
+  Plus,
+  Radio,
+  Repeat2,
+  Search,
+  Settings2,
+  Shuffle,
+  SkipBack,
+  SkipForward,
+  Sparkles,
+  Volume1,
+  Volume2,
+  VolumeX,
+  Waves,
+  X,
+  Youtube,
+} from 'lucide-react'
+import {
+  initialPlaylists,
+  moods,
+  playlists,
+  tracks,
+  type Mood,
+  type Playlist,
+  type Track,
+} from './catalog'
+import { recommend, searchTracks } from './recommendations'
+import { useStoredState } from './storage'
+import { YouTubeLibrary, YouTubePlayer } from './YouTubeLibrary'
+import { isPortable, youtubeUrl, type YouTubeVideo } from './youtube'
+
+type Page = 'home' | 'browse' | 'radio' | 'liked' | 'history' | 'playlist' | 'search' | 'youtube'
+type Route = { page: Page; playlistId?: string }
+type InstallEvent = Event & {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: string }>
+}
+const byId = (id: string) => tracks.find((t) => t.id === id)!
+const time = (seconds: number) =>
+  `${Math.floor((seconds || 0) / 60)}:${String(Math.floor((seconds || 0) % 60)).padStart(2, '0')}`
+
+function Artwork({
+  kind,
+  className = '',
+  title,
+}: {
+  kind: string
+  className?: string
+  title?: string
+}) {
+  return (
+    <div className={`artwork art-${kind} ${className}`} aria-hidden="true">
+      <div className="art-texture" />
+      <div className="art-object" />
+      <div className="art-orbit" />
+      <span className="art-brand">
+        <AudioLines size={15} /> VOLNA SELECT
+      </span>
+      {title && <span className="art-title">{title}</span>}
+      <span className="art-caption">SOUND FOR YOUR STATE OF MIND</span>
+    </div>
+  )
+}
+
+export default function App() {
+  const [routes, setRoutes] = useState<Route[]>([{ page: 'home' }])
+  const [routeIndex, setRouteIndex] = useState(0)
+  const route = routes[routeIndex]
+  const page = route.page
+  const [query, setQuery] = useState('')
+  const [tab, setTab] = useState('Все')
+  const [mood, setMood] = useState<Mood>('all')
+  const [liked, setLiked] = useStoredState<string[]>('volna.liked', [])
+  const [history, setHistory] = useStoredState<string[]>('volna.history', [])
+  const [myPlaylists, setMyPlaylists] = useStoredState<Playlist[]>(
+    'volna.playlists',
+    initialPlaylists,
+  )
+  const [currentId, setCurrentId] = useStoredState('volna.current', tracks[0].id)
+  const [volume, setVolume] = useStoredState('volna.volume', 0.7)
+  const [queue, setQueue] = useState(tracks.map((t) => t.id))
+  const [playing, setPlaying] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [duration, setDuration] = useState(48)
+  const [shuffle, setShuffle] = useState(false)
+  const [repeat, setRepeat] = useState(false)
+  const [queueOpen, setQueueOpen] = useState(false)
+  const [nowPlaying, setNowPlaying] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [dialog, setDialog] = useState<'create' | 'about' | 'add' | null>(null)
+  const [newPlaylistName, setNewPlaylistName] = useState('')
+  const [menuTrack, setMenuTrack] = useState<string | null>(null)
+  const [addTrack, setAddTrack] = useState<string | null>(null)
+  const [toast, setToast] = useState('')
+  const [installEvent, setInstallEvent] = useState<InstallEvent | null>(null)
+  const [youtubeVideo, setYoutubeVideo] = useState<YouTubeVideo | null>(null)
+  const audio = useRef<HTMLAudioElement>(null)
+  const search = useRef<HTMLInputElement>(null)
+  const autoplay = useRef(false)
+  const main = useRef<HTMLElement>(null)
+  const current = tracks.find((t) => t.id === currentId) ?? tracks[0]
+  const recommended = useMemo(() => recommend(tracks, liked, history, mood), [liked, history, mood])
+  const selectedPlaylist = [...playlists, ...myPlaylists].find((p) => p.id === route.playlistId)
+  const searchResults = useMemo(() => searchTracks(tracks, query), [query])
+
+  function navigate(next: Page, playlistId?: string) {
+    setRoutes((previous) => [...previous.slice(0, routeIndex + 1), { page: next, playlistId }])
+    setRouteIndex(routeIndex + 1)
+    setProfileOpen(false)
+    setMenuTrack(null)
+    main.current?.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  function notify(message: string) {
+    setToast(message)
+  }
+  function toggleLike(id: string) {
+    setLiked((previous) =>
+      previous.includes(id) ? previous.filter((item) => item !== id) : [...previous, id],
+    )
+  }
+  function playTrack(track: Track, list?: string[]) {
+    setYoutubeVideo(null)
+    autoplay.current = true
+    if (list?.length) setQueue(list)
+    if (current.id === track.id) {
+      void audio.current?.play().catch(() => {
+        setLoading(false)
+        notify('Не удалось воспроизвести трек. Попробуй ещё раз.')
+      })
+    } else setCurrentId(track.id)
+  }
+  function togglePlayback() {
+    if (!audio.current) return
+    if (playing) audio.current.pause()
+    else playTrack(current)
+  }
+  function nextTrack(direction = 1) {
+    if (direction === -1 && audio.current && audio.current.currentTime > 3) {
+      audio.current.currentTime = 0
+      return
+    }
+    const candidates = queue.filter((id) => tracks.some((t) => t.id === id))
+    if (!candidates.length) return
+    const index = candidates.indexOf(current.id)
+    const next =
+      shuffle && candidates.length > 1
+        ? candidates.filter((id) => id !== current.id)[
+            Math.floor(Math.random() * (candidates.length - 1))
+          ]
+        : candidates[(index + direction + candidates.length) % candidates.length]
+    if (next === current.id && audio.current) {
+      audio.current.currentTime = 0
+      void audio.current.play()
+    } else playTrack(byId(next))
+  }
+  function playCollection(ids: string[]) {
+    if (ids.length) playTrack(byId(ids[0]), ids)
+  }
+  function playYouTube(video: YouTubeVideo) {
+    if (isPortable()) {
+      window.open(youtubeUrl(video.id), '_blank', 'noopener,noreferrer')
+      notify('Открываем YouTube. Встроенный плеер доступен в серверной версии Volna.')
+      return
+    }
+    audio.current?.pause()
+    setNowPlaying(false)
+    setQueueOpen(false)
+    setYoutubeVideo(video)
+  }
+  function createPlaylist(event: React.SyntheticEvent) {
+    event.preventDefault()
+    const title = newPlaylistName.trim()
+    if (!title) return
+    const playlist: Playlist = {
+      id: `custom-${crypto.randomUUID?.() ?? Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('')}`,
+      title,
+      description: 'Твоя личная коллекция',
+      artwork: 'blue',
+      color: '#477bf4',
+      tracks: [],
+    }
+    setMyPlaylists((previous) => [...previous, playlist])
+    setNewPlaylistName('')
+    setDialog(null)
+    navigate('playlist', playlist.id)
+    notify('Плейлист создан. Добавь в него любимую музыку.')
+  }
+  function addToPlaylist(id: string) {
+    if (!addTrack) return
+    setMyPlaylists((previous) =>
+      previous.map((p) =>
+        p.id === id ? { ...p, tracks: [...new Set([...p.tracks, addTrack])] } : p,
+      ),
+    )
+    setDialog(null)
+    setAddTrack(null)
+    notify('Трек добавлен в плейлист')
+  }
+  async function install() {
+    setProfileOpen(false)
+    if (location.protocol === 'file:' || document.documentElement.dataset.portable === 'true') {
+      notify(
+        'Этот HTML уже работает автономно. Для установки приложения открой серверную версию Volna.',
+      )
+      return
+    }
+    if (installEvent) {
+      await installEvent.prompt()
+      const choice = await installEvent.userChoice
+      if (choice.outcome === 'accepted') setInstallEvent(null)
+    } else notify('В меню браузера выбери «Установить приложение» или «На экран Домой».')
+  }
+
+  useEffect(() => {
+    if (!autoplay.current || !audio.current) return
+    setProgress(0)
+    setLoading(true)
+    void audio.current.play().catch(() => {
+      setLoading(false)
+      notify('Не удалось включить музыку. Нажми воспроизведение ещё раз.')
+    })
+  }, [current.id])
+  useEffect(() => {
+    if (audio.current) audio.current.volume = Math.min(1, Math.max(0, volume))
+  }, [volume])
+  useEffect(() => {
+    if (!toast) return
+    const timeout = setTimeout(() => setToast(''), 4200)
+    return () => clearTimeout(timeout)
+  }, [toast])
+  useEffect(() => {
+    const handler = (event: Event) => {
+      event.preventDefault()
+      setInstallEvent(event as InstallEvent)
+    }
+    window.addEventListener('beforeinstallprompt', handler)
+    return () => window.removeEventListener('beforeinstallprompt', handler)
+  }, [])
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement
+      if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
+        event.preventDefault()
+        search.current?.focus()
+        return
+      }
+      if (target.matches('input, textarea, button, select') || target.isContentEditable) return
+      if (event.code === 'Space' && !dialog) {
+        event.preventDefault()
+        togglePlayback()
+      }
+      if (event.key === 'Escape') {
+        setDialog(null)
+        setNowPlaying(false)
+        setQueueOpen(false)
+        setProfileOpen(false)
+        setMenuTrack(null)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  })
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setDialog(null)
+        setNowPlaying(false)
+        setMenuTrack(null)
+        setProfileOpen(false)
+      }
+    }
+    window.addEventListener('keydown', escape)
+    return () => window.removeEventListener('keydown', escape)
+  }, [])
+
+  useEffect(() => {
+    if (!dialog && !nowPlaying) return
+    const previousFocus = document.activeElement as HTMLElement | null
+    const panel = document.querySelector<HTMLElement>(nowPlaying ? '.now-playing-screen' : '.modal')
+    if (!panel) return
+    const selector = 'button:not([disabled]), input:not([disabled]), [tabindex="0"]'
+    const first =
+      panel.querySelector<HTMLElement>('input') ?? panel.querySelector<HTMLElement>(selector)
+    first?.focus()
+    const trapFocus = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return
+      const controls = [...panel.querySelectorAll<HTMLElement>(selector)]
+      const first = controls[0]
+      const last = controls[controls.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last?.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first?.focus()
+      }
+    }
+    panel.addEventListener('keydown', trapFocus)
+    return () => {
+      panel.removeEventListener('keydown', trapFocus)
+      previousFocus?.focus()
+    }
+  }, [dialog, nowPlaying])
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: current.title,
+      artist: current.artist,
+      album: 'Volna Originals',
+      artwork: [{ src: '/app-icon-512.png', sizes: '512x512', type: 'image/png' }],
+    })
+    navigator.mediaSession.playbackState = playing ? 'playing' : 'paused'
+    navigator.mediaSession.setActionHandler('play', () => playTrack(current))
+    navigator.mediaSession.setActionHandler('pause', () => audio.current?.pause())
+    navigator.mediaSession.setActionHandler('previoustrack', () => nextTrack(-1))
+    navigator.mediaSession.setActionHandler('nexttrack', () => nextTrack(1))
+    navigator.mediaSession.setActionHandler('seekto', (details) => {
+      if (audio.current && details.seekTime !== undefined)
+        audio.current.currentTime = details.seekTime
+    })
+    return () => {
+      for (const action of ['play', 'pause', 'previoustrack', 'nexttrack', 'seekto'] as const)
+        navigator.mediaSession.setActionHandler(action, null)
+    }
+  }, [current.id, playing, shuffle, repeat, queue])
+
+  function renderTrackRows(items: Track[], showNumber = true) {
+    return (
+      <div className="track-list">
+        {items.map((track, index) => (
+          <div
+            className={`track-row ${current.id === track.id && playing ? 'is-playing' : ''}`}
+            key={track.id}
+          >
+            {showNumber && (
+              <span className="track-number">
+                {current.id === track.id && playing ? (
+                  <span className="equalizer">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                ) : (
+                  String(index + 1).padStart(2, '0')
+                )}
+              </span>
+            )}
+            <button
+              className="track-cover"
+              onClick={() =>
+                playTrack(
+                  track,
+                  items.map((t) => t.id),
+                )
+              }
+              aria-label={`Слушать ${track.title}`}
+            >
+              <Artwork kind={track.artwork} />
+              <span>
+                {current.id === track.id && playing ? (
+                  <AudioLines size={20} />
+                ) : (
+                  <Play size={18} fill="currentColor" />
+                )}
+              </span>
+            </button>
+            <button
+              className="track-info"
+              onClick={() =>
+                playTrack(
+                  track,
+                  items.map((t) => t.id),
+                )
+              }
+            >
+              <strong>{track.title}</strong>
+              <span>{track.artist}</span>
+            </button>
+            <span className="track-genre">{track.genre}</span>
+            <button
+              className={`icon-button like-button ${liked.includes(track.id) ? 'active' : ''}`}
+              aria-label={
+                liked.includes(track.id)
+                  ? `Убрать ${track.title} из избранного`
+                  : `Добавить ${track.title} в избранное`
+              }
+              onClick={() => toggleLike(track.id)}
+            >
+              <Heart size={17} fill={liked.includes(track.id) ? 'currentColor' : 'none'} />
+            </button>
+            <span className="track-duration">{time(track.duration)}</span>
+            <div className="track-actions">
+              <button
+                className="icon-button"
+                aria-label={`Действия с ${track.title}`}
+                onClick={() => setMenuTrack(menuTrack === track.id ? null : track.id)}
+              >
+                <MoreHorizontal size={20} />
+              </button>
+              {menuTrack === track.id && (
+                <>
+                  <button
+                    className="menu-dismiss"
+                    aria-label="Закрыть меню трека"
+                    onClick={() => setMenuTrack(null)}
+                  />
+                  <div className="context-menu">
+                    <button
+                      onClick={() => {
+                        setQueue((previous) => [...previous, track.id])
+                        setMenuTrack(null)
+                        notify('Трек добавлен в очередь')
+                      }}
+                    >
+                      <ListMusic size={16} /> В очередь
+                    </button>
+                    <button
+                      onClick={() => {
+                        setAddTrack(track.id)
+                        setMenuTrack(null)
+                        setDialog('add')
+                      }}
+                    >
+                      <Plus size={16} /> В плейлист
+                    </button>
+                    {selectedPlaylist?.id.startsWith('custom-') && (
+                      <button
+                        onClick={() => {
+                          setMyPlaylists((previous) =>
+                            previous.map((p) =>
+                              p.id === selectedPlaylist.id
+                                ? { ...p, tracks: p.tracks.filter((id) => id !== track.id) }
+                                : p,
+                            ),
+                          )
+                          setMenuTrack(null)
+                        }}
+                      >
+                        <X size={16} /> Удалить из плейлиста
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+  function renderPlaylistCard(playlist: Playlist) {
+    return (
+      <article className="playlist-card" key={playlist.id}>
+        <div className="playlist-art-wrap">
+          <button
+            className="playlist-art-button"
+            onClick={() => navigate('playlist', playlist.id)}
+            aria-label={`Открыть ${playlist.title}`}
+          >
+            <Artwork kind={playlist.artwork} title={playlist.label || playlist.title} />
+          </button>
+          <button
+            className="card-play"
+            aria-label={`Слушать плейлист ${playlist.title}`}
+            onClick={() => playCollection(playlist.tracks)}
+          >
+            <Play size={21} fill="currentColor" />
+          </button>
+        </div>
+        <button className="playlist-name" onClick={() => navigate('playlist', playlist.id)}>
+          {playlist.title}
+        </button>
+        <p>{playlist.description}</p>
+      </article>
+    )
+  }
+  const pageTitles: Record<Page, string> = {
+    home: 'Главная',
+    browse: 'Обзор',
+    radio: 'Моя волна',
+    liked: 'Любимые треки',
+    history: 'Недавно слушал',
+    playlist: 'Плейлист',
+    search: 'Поиск',
+    youtube: 'YouTube',
+  }
+  const playlistScore = (playlist: Playlist) =>
+    playlist.tracks.reduce(
+      (sum, id) =>
+        sum +
+        (tracks.length - recommended.findIndex((track) => track.id === id)) +
+        (liked.includes(id) ? 6 : 0),
+      0,
+    ) / playlist.tracks.length
+  const visiblePlaylists =
+    tab === 'Новинки'
+      ? [...playlists].reverse().slice(0, 5)
+      : tab === 'Плейлисты'
+        ? myPlaylists
+        : tab === 'Для тебя'
+          ? [...playlists].sort((a, b) => playlistScore(b) - playlistScore(a)).slice(0, 5)
+          : playlists.slice(0, 5)
+  const collectionTracks =
+    page === 'liked'
+      ? liked.map(byId).filter(Boolean)
+      : page === 'history'
+        ? history.map(byId).filter(Boolean)
+        : (selectedPlaylist?.tracks ?? []).map(byId).filter(Boolean)
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <button className="brand" onClick={() => navigate('home')} aria-label="Volna — главная">
+          <span className="brand-symbol">
+            <i />
+            <i />
+            <i />
+            <i />
+          </span>
+          <span>
+            volna<span className="brand-dot">.</span>
+          </span>
+        </button>
+        <div className="sidebar-caption">ТВОЯ МУЗЫКАЛЬНАЯ ВСЕЛЕННАЯ</div>
+        <nav className="primary-nav" aria-label="Основная навигация">
+          {(
+            [
+              { id: 'home', icon: Home, label: 'Главная' },
+              { id: 'browse', icon: Compass, label: 'Обзор' },
+              { id: 'radio', icon: Radio, label: 'Моя волна' },
+              { id: 'youtube', icon: Youtube, label: 'YouTube' },
+            ] as const
+          ).map((item) => (
+            <button
+              key={item.id}
+              className={page === item.id ? 'nav-item selected' : 'nav-item'}
+              onClick={() => navigate(item.id)}
+            >
+              <item.icon size={20} strokeWidth={1.7} />
+              <span>{item.label}</span>
+              {item.id === 'radio' && <Sparkles size={13} className="nav-sparkle" />}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-section-title">МОЯ КОЛЛЕКЦИЯ</div>
+        <nav className="collection-nav" aria-label="Медиатека">
+          <button
+            className={`nav-item ${page === 'liked' ? 'selected' : ''}`}
+            onClick={() => navigate('liked')}
+          >
+            <Heart size={20} strokeWidth={1.7} />
+            <span>Любимые треки</span>
+            {liked.length > 0 && <small>{liked.length}</small>}
+          </button>
+          <button
+            className={`nav-item ${page === 'history' ? 'selected' : ''}`}
+            onClick={() => navigate('history')}
+          >
+            <Clock3 size={20} strokeWidth={1.7} />
+            <span>Недавно слушал</span>
+          </button>
+        </nav>
+        <div className="sidebar-section-title playlist-heading">
+          ПЛЕЙЛИСТЫ
+          <button
+            className="icon-button"
+            aria-label="Создать плейлист"
+            onClick={() => setDialog('create')}
+          >
+            <Plus size={17} />
+          </button>
+        </div>
+        <div className="sidebar-playlists">
+          {myPlaylists.map((playlist) => (
+            <button
+              key={playlist.id}
+              className={`sidebar-playlist ${route.playlistId === playlist.id ? 'selected-playlist' : ''}`}
+              onClick={() => navigate('playlist', playlist.id)}
+            >
+              <Artwork kind={playlist.artwork} />
+              <span>
+                <strong>{playlist.title}</strong>
+                <small>Плейлист · {playlist.tracks.length} треков</small>
+              </span>
+            </button>
+          ))}
+        </div>
+        <div className="sidebar-bottom">
+          <div className="sidebar-note">
+            <span className="note-icon">
+              <Headphones size={23} />
+            </span>
+            <strong>Хорошо быть на своей волне</strong>
+            <p>
+              Музыка под любой момент.
+              <br />И немного больше.
+            </p>
+            <button onClick={() => setDialog('about')}>
+              Знакомься с Volna <ArrowRight size={15} />
+            </button>
+          </div>
+          <button className="install-link" onClick={() => void install()}>
+            <ArrowDownToLine size={16} /> Установить приложение
+          </button>
+        </div>
+      </aside>
+
+      <div className="workspace">
+        <header className="topbar">
+          <div className="history-controls">
+            <button
+              className="icon-button"
+              aria-label="Назад"
+              disabled={routeIndex === 0}
+              onClick={() => setRouteIndex((i) => i - 1)}
+            >
+              <ChevronLeft size={21} />
+            </button>
+            <button
+              className="icon-button"
+              aria-label="Вперёд"
+              disabled={routeIndex === routes.length - 1}
+              onClick={() => setRouteIndex((i) => i + 1)}
+            >
+              <ChevronRight size={21} />
+            </button>
+          </div>
+          <span className="topbar-page">{pageTitles[page]}</span>
+          <div className="search-box">
+            <Search size={18} />
+            <input
+              ref={search}
+              aria-label="Поиск музыки"
+              placeholder="Треки, исполнители, настроение"
+              value={query}
+              onFocus={() => {
+                if (query && page !== 'search') navigate('search')
+              }}
+              onChange={(event) => {
+                setQuery(event.target.value)
+                if (page !== 'search') navigate('search')
+              }}
+            />
+            {query ? (
+              <button
+                aria-label="Очистить поиск"
+                onClick={() => {
+                  setQuery('')
+                  search.current?.focus()
+                }}
+              >
+                <X size={15} />
+              </button>
+            ) : (
+              <kbd>⌘ K</kbd>
+            )}
+          </div>
+          <div className="topbar-right">
+            <button
+              className="notification-button icon-button"
+              aria-label="Открыть новости"
+              onClick={() =>
+                notify(
+                  'Ты на своей волне! В каталоге 8 инструментальных треков — попробуй открыть что-то новое.',
+                )
+              }
+            >
+              <Bell size={20} />
+              <i />
+            </button>
+            <div className="profile-wrap">
+              <button
+                className="profile-button"
+                onClick={() => setProfileOpen(!profileOpen)}
+                aria-label="Меню профиля"
+                aria-expanded={profileOpen}
+              >
+                <span className="avatar">А</span>
+                <span className="profile-name">
+                  Алекс<span>Личный профиль</span>
+                </span>
+                <ChevronDown size={14} />
+              </button>
+              {profileOpen && (
+                <>
+                  <button
+                    className="menu-dismiss"
+                    aria-label="Закрыть меню профиля"
+                    onClick={() => setProfileOpen(false)}
+                  />
+                  <div className="profile-menu context-menu">
+                    <strong>Твоя музыка. Твои правила.</strong>
+                    <small>Профиль хранится на этом устройстве</small>
+                    <button onClick={() => void install()}>
+                      <ArrowDownToLine size={16} />
+                      Установить приложение
+                    </button>
+                    <button
+                      onClick={() => {
+                        setDialog('about')
+                        setProfileOpen(false)
+                      }}
+                    >
+                      <Headphones size={16} />О приложении
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </header>
+
+        <main ref={main} className={`main-content ${queueOpen ? 'with-queue' : ''}`}>
+          {page === 'youtube' && <YouTubeLibrary onPlay={playYouTube} />}
+          {(page === 'home' || page === 'browse') && (
+            <>
+              <div className="page-heading">
+                <div>
+                  <div className="eyebrow">ТВОЙ САУНДТРЕК НА СЕГОДНЯ</div>
+                  <h1>
+                    {page === 'browse' ? (
+                      'Всегда есть что открыть'
+                    ) : (
+                      <>
+                        Хороший день начинается с музыки<span className="heading-dot">.</span>
+                      </>
+                    )}
+                  </h1>
+                  <p>
+                    {page === 'browse'
+                      ? 'Новые звуки, неожиданные встречи и будущие любимые.'
+                      : 'С возвращением, Алекс. Давай найдём твой ритм.'}
+                  </p>
+                </div>
+                <span className="date-badge">
+                  <span /> ТВОЙ МОМЕНТ. ТВОЯ МУЗЫКА.
+                </span>
+              </div>
+              <div className="feed-tabs" role="tablist" aria-label="Разделы ленты">
+                {['Все', 'Для тебя', 'Новинки', 'Плейлисты'].map((name) => (
+                  <button
+                    key={name}
+                    role="tab"
+                    aria-selected={tab === name}
+                    onClick={() => setTab(name)}
+                    className={tab === name ? 'active' : ''}
+                  >
+                    {name === 'Для тебя' && <Sparkles size={14} />}
+                    {name}
+                  </button>
+                ))}
+              </div>
+              <section className="hero" aria-label="Персональная волна">
+                <div className="hero-photograph" />
+                <div className="hero-grain" />
+                <div className="hero-content">
+                  <div className="hero-label">
+                    <Sparkles size={14} /> НАСТРОЕНО НА ТЕБЯ
+                  </div>
+                  <h2>
+                    Поймай свою
+                    <br />
+                    <span>волну.</span>
+                  </h2>
+                  <p>Твои любимые треки и открытия, которые попадут в самое сердце.</p>
+                  <div className="hero-buttons">
+                    <button
+                      className="primary-button"
+                      onClick={() => playCollection(recommended.map((t) => t.id))}
+                    >
+                      <Play size={17} fill="currentColor" /> Слушать мою волну
+                    </button>
+                    <button
+                      className="hero-more"
+                      aria-label="Открыть мою волну"
+                      onClick={() => navigate('radio')}
+                    >
+                      <ArrowRight size={20} />
+                    </button>
+                  </div>
+                  <div className="hero-footer">
+                    <span className="mini-signal">
+                      <i />
+                      <i />
+                      <i />
+                      <i />
+                    </span>{' '}
+                    Меняется вместе с тобой
+                  </div>
+                </div>
+                <div className="hero-orb">
+                  <span className="orb-ring ring-one" />
+                  <span className="orb-ring ring-two" />
+                  <span className="orb-ring ring-three" />
+                  <Waves size={95} strokeWidth={0.8} />
+                  <span className="orb-label">
+                    YOUR DAILY
+                    <br />
+                    <b>FREQUENCY</b>
+                  </span>
+                </div>
+                <span className="hero-edition">VOLNA PERSONAL SERIES — 001</span>
+              </section>
+              <section className="section recommendations-section">
+                <div className="section-heading">
+                  <div>
+                    <h2>
+                      {tab === 'Новинки' ? (
+                        'Свежий звук'
+                      ) : tab === 'Плейлисты' ? (
+                        'Твоя коллекция'
+                      ) : (
+                        <>
+                          Собрано для тебя <Sparkles size={18} />
+                        </>
+                      )}
+                    </h2>
+                    <p>
+                      {tab === 'Плейлисты'
+                        ? 'Музыка, которую хочется оставить рядом'
+                        : 'Вдохновлено твоим вкусом. Дополнено открытиями.'}
+                    </p>
+                  </div>
+                  <button className="text-button" onClick={() => navigate('browse')}>
+                    Смотреть всё <ChevronRight size={16} />
+                  </button>
+                </div>
+                <div className="playlist-grid">
+                  {(page === 'browse'
+                    ? tab === 'Плейлисты'
+                      ? myPlaylists
+                      : playlists
+                    : visiblePlaylists
+                  ).map(renderPlaylistCard)}
+                </div>
+              </section>
+              <div className="home-lower-grid">
+                <section className="section picked-section">
+                  <div className="section-heading">
+                    <div>
+                      <h2>Тебе может понравиться</h2>
+                      <p>Стоит только нажать play</p>
+                    </div>
+                    <button
+                      className="icon-button"
+                      aria-label="Все рекомендации"
+                      onClick={() => navigate('radio')}
+                    >
+                      <ArrowRight size={19} />
+                    </button>
+                  </div>
+                  {renderTrackRows(recommended.slice(0, 4))}
+                </section>
+                <section className="section mood-section">
+                  <div className="section-heading">
+                    <div>
+                      <h2>Как ты сегодня?</h2>
+                      <p>Для любого состояния души</p>
+                    </div>
+                    <Settings2 size={17} />
+                  </div>
+                  <div className="mood-grid">
+                    {moods.map((item) => (
+                      <button
+                        className={`mood-card mood-${item.id}`}
+                        key={item.id}
+                        onClick={() => {
+                          setMood(item.id)
+                          navigate('radio')
+                        }}
+                      >
+                        <span className="mood-symbol">{item.emoji}</span>
+                        <span>
+                          <strong>{item.title}</strong>
+                          <small>{item.subtitle}</small>
+                        </span>
+                        <ArrowRight size={16} />
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              </div>
+              <div className="page-footer">
+                <span className="footer-brand">
+                  <AudioLines size={15} /> На одной волне с тобой.
+                </span>
+                <span>Музыка делает момент.</span>
+              </div>
+            </>
+          )}
+
+          {page === 'radio' && (
+            <>
+              <div className="page-heading">
+                <div>
+                  <div className="eyebrow">
+                    <Sparkles size={13} /> ПЕРСОНАЛЬНЫЕ РЕКОМЕНДАЦИИ
+                  </div>
+                  <h1>
+                    Только твоя волна<span className="heading-dot">.</span>
+                  </h1>
+                  <p>Отмечай любимое — и каждый следующий трек будет ближе.</p>
+                </div>
+              </div>
+              <div className="radio-banner">
+                <div className="radio-visual">
+                  <Radio size={68} strokeWidth={1} />
+                  <div className="radio-circle" />
+                </div>
+                <div>
+                  <span className="eyebrow">МУЗЫКА, КОТОРАЯ ЧУВСТВУЕТ</span>
+                  <h2>Настроимся на тебя</h2>
+                  <p>Рекомендации учитывают избранное, историю и твоё настроение.</p>
+                  <button
+                    className="primary-button"
+                    onClick={() => playCollection(recommended.map((t) => t.id))}
+                  >
+                    <Play size={17} fill="currentColor" /> Включить волну
+                  </button>
+                </div>
+              </div>
+              <div className="mood-filters">
+                <button className={mood === 'all' ? 'active' : ''} onClick={() => setMood('all')}>
+                  Любое настроение
+                </button>
+                {moods.map((item) => (
+                  <button
+                    key={item.id}
+                    className={mood === item.id ? 'active' : ''}
+                    onClick={() => setMood(item.id)}
+                  >
+                    {item.emoji} {item.title}
+                  </button>
+                ))}
+              </div>
+              <div className="section-heading">
+                <h2>Твоя следующая находка</h2>
+                <span className="muted">{recommended.length} треков</span>
+              </div>
+              {renderTrackRows(recommended)}
+              <div className="recommendation-note">
+                <Sparkles size={18} />
+                <span>
+                  Твои лайки влияют на подборку. Новые открытия чередуются с любимыми жанрами.
+                </span>
+              </div>
+            </>
+          )}
+
+          {page === 'search' && (
+            <>
+              <div className="page-heading">
+                <div>
+                  <div className="eyebrow">НОВАЯ МУЗЫКА УЖЕ БЛИЗКО</div>
+                  <h1>
+                    {query ? 'Вот что нашлось' : 'Найди свой звук'}
+                    <span className="heading-dot">.</span>
+                  </h1>
+                  <p>
+                    {query
+                      ? `Результаты по запросу «${query}»`
+                      : 'Ищи по названию, исполнителю или жанру.'}
+                  </p>
+                </div>
+              </div>
+              {!query && (
+                <div className="search-suggestions">
+                  {['Электроника', 'Лоу-фай', 'Эмбиент', 'Хаус'].map((item) => (
+                    <button key={item} onClick={() => setQuery(item)}>
+                      <Search size={15} />
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {searchResults.length ? (
+                <>
+                  <div className="section-heading">
+                    <h2>Треки</h2>
+                    <span className="muted">{searchResults.length} найдено</span>
+                  </div>
+                  {renderTrackRows(searchResults)}
+                </>
+              ) : (
+                <div className="empty-state">
+                  <Search size={44} strokeWidth={1} />
+                  <h2>Кажется, здесь пока тихо</h2>
+                  <p>Попробуй другое название или найди что-то по жанру.</p>
+                  <button className="primary-button" onClick={() => setQuery('')}>
+                    Показать весь каталог
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {(page === 'liked' || page === 'history' || page === 'playlist') && (
+            <>
+              <div className={`collection-hero collection-${page}`}>
+                <div className="collection-art">
+                  {page === 'liked' ? (
+                    <Heart size={74} fill="currentColor" strokeWidth={1} />
+                  ) : page === 'history' ? (
+                    <Clock3 size={74} strokeWidth={1} />
+                  ) : (
+                    <Artwork
+                      kind={selectedPlaylist?.artwork ?? 'blue'}
+                      title={selectedPlaylist?.title}
+                    />
+                  )}
+                </div>
+                <div className="collection-description">
+                  <div className="eyebrow">
+                    {page === 'history' ? 'ТВОИ МУЗЫКАЛЬНЫЕ МОМЕНТЫ' : 'ТВОЯ КОЛЛЕКЦИЯ'}
+                  </div>
+                  <h1>
+                    {page === 'playlist'
+                      ? (selectedPlaylist?.title ?? 'Плейлист')
+                      : pageTitles[page]}
+                  </h1>
+                  <p>
+                    {page === 'liked'
+                      ? 'Всё, что попало в самое сердце.'
+                      : page === 'history'
+                        ? 'Всегда приятно вернуться к хорошему.'
+                        : selectedPlaylist?.description}
+                  </p>
+                  <div className="collection-meta">
+                    <span className="small-avatar">А</span>
+                    <b>Алекс</b>
+                    <span>·</span>
+                    {collectionTracks.length} треков<span>·</span>
+                    {time(collectionTracks.reduce((sum, t) => sum + t.duration, 0))}
+                  </div>
+                </div>
+              </div>
+              <div className="collection-controls">
+                <button
+                  className="large-play"
+                  disabled={!collectionTracks.length}
+                  aria-label="Слушать коллекцию"
+                  onClick={() => playCollection(collectionTracks.map((t) => t.id))}
+                >
+                  <Play size={24} fill="currentColor" />
+                </button>
+                <button
+                  className={`icon-button ${shuffle ? 'active' : ''}`}
+                  aria-label="Перемешать коллекцию"
+                  onClick={() => {
+                    setShuffle(!shuffle)
+                    notify(
+                      shuffle
+                        ? 'Порядок воспроизведения восстановлен'
+                        : 'Случайный порядок включён',
+                    )
+                  }}
+                >
+                  <Shuffle size={24} />
+                </button>
+                {page === 'playlist' && (
+                  <button
+                    className="text-button"
+                    onClick={() => {
+                      navigate('search')
+                      search.current?.focus()
+                    }}
+                  >
+                    <Plus size={17} /> Добавить треки
+                  </button>
+                )}
+                <span className="muted collection-track-label">
+                  {collectionTracks.length} треков
+                </span>
+              </div>
+              {collectionTracks.length ? (
+                <>
+                  <div className="table-heading">
+                    <span>#</span>
+                    <span>НАЗВАНИЕ</span>
+                    <span>ЖАНР</span>
+                    <Clock3 size={15} />
+                  </div>
+                  {renderTrackRows(collectionTracks)}
+                </>
+              ) : (
+                <div className="empty-state">
+                  {page === 'liked' ? (
+                    <Heart size={44} strokeWidth={1} />
+                  ) : (
+                    <Music2 size={44} strokeWidth={1} />
+                  )}
+                  <h2>
+                    {page === 'liked'
+                      ? 'Здесь будет твоя любимая музыка'
+                      : page === 'history'
+                        ? 'Начни свою музыкальную историю'
+                        : 'Начало чего-то хорошего'}
+                  </h2>
+                  <p>
+                    {page === 'liked'
+                      ? 'Нажимай на сердечко рядом с треком — он останется здесь.'
+                      : 'Открой каталог и найди треки, которые захочется слушать снова.'}
+                  </p>
+                  <button className="primary-button" onClick={() => navigate('browse')}>
+                    Открыть музыку <ArrowRight size={17} />
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </main>
+      </div>
+
+      {youtubeVideo && <YouTubePlayer video={youtubeVideo} onClose={() => setYoutubeVideo(null)} />}
+      {queueOpen && (
+        <aside className="queue-panel">
+          <div className="queue-heading">
+            <h2>Очередь</h2>
+            <button
+              className="icon-button"
+              aria-label="Закрыть очередь"
+              onClick={() => setQueueOpen(false)}
+            >
+              <X size={19} />
+            </button>
+          </div>
+          <div className="eyebrow">СЕЙЧАС ИГРАЕТ</div>
+          <div className="queue-current">
+            <Artwork kind={current.artwork} />
+            <div>
+              <strong>{current.title}</strong>
+              <span>{current.artist}</span>
+            </div>
+            <AudioLines size={20} />
+          </div>
+          <div className="queue-next-title">
+            <span className="eyebrow">ДАЛЬШЕ</span>
+            <button className="text-button" onClick={() => setQueue([current.id])}>
+              Очистить
+            </button>
+          </div>
+          <div className="queue-list">
+            {queue.slice(queue.indexOf(current.id) + 1).map((id, index) => (
+              <div className="queue-track" key={`${id}-${index}`}>
+                <button onClick={() => playTrack(byId(id))}>
+                  <Artwork kind={byId(id).artwork} />
+                  <span>
+                    <strong>{byId(id).title}</strong>
+                    <small>{byId(id).artist}</small>
+                  </span>
+                </button>
+                <button
+                  className="icon-button"
+                  aria-label={`Убрать ${byId(id).title} из очереди`}
+                  onClick={() =>
+                    setQueue((previous) =>
+                      previous.filter((_, i) => i !== previous.indexOf(current.id) + 1 + index),
+                    )
+                  }
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            ))}
+            {queue.length <= 1 && (
+              <p className="queue-empty">Добавь треки через меню ··· рядом с названием.</p>
+            )}
+          </div>
+        </aside>
+      )}
+
+      <footer className="player" aria-label="Музыкальный плеер">
+        <div className="player-track">
+          <button
+            className="player-cover"
+            aria-label="Открыть экран воспроизведения"
+            onClick={() => setNowPlaying(true)}
+          >
+            <Artwork kind={current.artwork} />
+            <Maximize2 size={17} />
+          </button>
+          <div className="player-track-info">
+            <strong>{current.title}</strong>
+            <span>{current.artist}</span>
+          </div>
+          <button
+            className={`icon-button ${liked.includes(current.id) ? 'active' : ''}`}
+            aria-label="Любимый текущий трек"
+            aria-pressed={liked.includes(current.id)}
+            onClick={() => toggleLike(current.id)}
+          >
+            <Heart size={19} fill={liked.includes(current.id) ? 'currentColor' : 'none'} />
+          </button>
+        </div>
+        <div className="player-center">
+          <div className="playback-controls">
+            <button
+              className={`icon-button ${shuffle ? 'active dot-active' : ''}`}
+              aria-label="Случайный порядок"
+              aria-pressed={shuffle}
+              onClick={() => setShuffle(!shuffle)}
+            >
+              <Shuffle size={17} />
+            </button>
+            <button
+              className="icon-button"
+              aria-label="Предыдущий трек"
+              onClick={() => nextTrack(-1)}
+            >
+              <SkipBack size={20} fill="currentColor" />
+            </button>
+            <button
+              className="play-pause"
+              aria-label={playing ? 'Пауза' : 'Воспроизвести'}
+              onClick={togglePlayback}
+            >
+              {loading ? (
+                <LoaderCircle size={21} className="spinner" />
+              ) : playing ? (
+                <Pause size={20} fill="currentColor" />
+              ) : (
+                <Play size={20} fill="currentColor" />
+              )}
+            </button>
+            <button
+              className="icon-button"
+              aria-label="Следующий трек"
+              onClick={() => nextTrack(1)}
+            >
+              <SkipForward size={20} fill="currentColor" />
+            </button>
+            <button
+              className={`icon-button ${repeat ? 'active dot-active' : ''}`}
+              aria-label="Повтор трека"
+              aria-pressed={repeat}
+              onClick={() => setRepeat(!repeat)}
+            >
+              <Repeat2 size={18} />
+              {repeat && <span className="repeat-one">1</span>}
+            </button>
+          </div>
+          <div className="progress-row">
+            <span>{time(progress)}</span>
+            <input
+              className="range progress-range"
+              type="range"
+              aria-label="Позиция воспроизведения"
+              min="0"
+              max={duration || 48}
+              step="0.1"
+              value={Math.min(progress, duration || 48)}
+              style={
+                { '--progress': `${(progress / (duration || 48)) * 100}%` } as React.CSSProperties
+              }
+              onChange={(event) => {
+                const value = Number(event.target.value)
+                if (audio.current && Number.isFinite(audio.current.duration))
+                  audio.current.currentTime = value
+                setProgress(value)
+              }}
+            />
+            <span>{time(duration)}</span>
+          </div>
+        </div>
+        <div className="player-right">
+          <span className="audio-quality">HQ</span>
+          <button
+            className={`icon-button ${queueOpen ? 'active' : ''}`}
+            aria-label="Очередь воспроизведения"
+            aria-pressed={queueOpen}
+            onClick={() => setQueueOpen(!queueOpen)}
+          >
+            <ListMusic size={19} />
+          </button>
+          <div className="volume-control">
+            <button
+              className="icon-button"
+              aria-label={volume === 0 ? 'Включить звук' : 'Выключить звук'}
+              onClick={() => setVolume(volume > 0 ? 0 : 0.7)}
+            >
+              {volume === 0 ? (
+                <VolumeX size={19} />
+              ) : volume < 0.5 ? (
+                <Volume1 size={19} />
+              ) : (
+                <Volume2 size={19} />
+              )}
+            </button>
+            <input
+              className="range volume-range"
+              type="range"
+              aria-label="Громкость"
+              min="0"
+              max="1"
+              step="0.01"
+              value={volume}
+              style={{ '--progress': `${volume * 100}%` } as React.CSSProperties}
+              onChange={(event) => setVolume(Number(event.target.value))}
+            />
+          </div>
+          <button
+            className="icon-button fullscreen-button"
+            aria-label="Полный экран плеера"
+            onClick={() => setNowPlaying(true)}
+          >
+            <Maximize2 size={17} />
+          </button>
+        </div>
+      </footer>
+
+      <nav className="mobile-nav" aria-label="Мобильная навигация">
+        <button className={page === 'youtube' ? 'active' : ''} onClick={() => navigate('youtube')}>
+          <Youtube size={21} />
+          <span>YouTube</span>
+        </button>
+        <button className={page === 'home' ? 'active' : ''} onClick={() => navigate('home')}>
+          <Home size={21} />
+          <span>Главная</span>
+        </button>
+        <button
+          className={page === 'search' ? 'active' : ''}
+          onClick={() => {
+            navigate('search')
+            search.current?.focus()
+          }}
+        >
+          <Search size={21} />
+          <span>Поиск</span>
+        </button>
+        <button className={page === 'radio' ? 'active' : ''} onClick={() => navigate('radio')}>
+          <Radio size={21} />
+          <span>Моя волна</span>
+        </button>
+        <button className={page === 'liked' ? 'active' : ''} onClick={() => navigate('liked')}>
+          <Heart size={21} />
+          <span>Коллекция</span>
+        </button>
+      </nav>
+
+      {nowPlaying && (
+        <div
+          className="now-playing-screen"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Сейчас играет"
+        >
+          <button
+            className="now-close icon-button"
+            aria-label="Свернуть плеер"
+            onClick={() => setNowPlaying(false)}
+          >
+            <ChevronDown size={27} />
+          </button>
+          <div className="eyebrow">
+            <AudioLines size={15} /> НА ТВОЕЙ ВОЛНЕ
+          </div>
+          <Artwork kind={current.artwork} title={current.title.toUpperCase()} />
+          <h2>{current.title}</h2>
+          <p>{current.artist}</p>
+          <button
+            className={`now-like icon-button ${liked.includes(current.id) ? 'active' : ''}`}
+            aria-label="Избранное в плеере"
+            onClick={() => toggleLike(current.id)}
+          >
+            <Heart fill={liked.includes(current.id) ? 'currentColor' : 'none'} />
+          </button>
+          <div className="now-time">
+            {time(progress)} <span> / {time(duration)}</span>
+          </div>
+          <div className="now-controls">
+            <button
+              className="icon-button"
+              aria-label="Предыдущий в полном экране"
+              onClick={() => nextTrack(-1)}
+            >
+              <SkipBack size={26} fill="currentColor" />
+            </button>
+            <button
+              className="play-pause"
+              aria-label={playing ? 'Пауза в полном экране' : 'Воспроизвести в полном экране'}
+              onClick={togglePlayback}
+            >
+              {playing ? (
+                <Pause size={27} fill="currentColor" />
+              ) : (
+                <Play size={27} fill="currentColor" />
+              )}
+            </button>
+            <button
+              className="icon-button"
+              aria-label="Следующий в полном экране"
+              onClick={() => nextTrack(1)}
+            >
+              <SkipForward size={26} fill="currentColor" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {dialog && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setDialog(null)
+          }}
+        >
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+            <button
+              className="modal-close icon-button"
+              aria-label="Закрыть диалог"
+              onClick={() => setDialog(null)}
+            >
+              <X size={21} />
+            </button>
+            {dialog === 'create' ? (
+              <>
+                <div className="modal-icon">
+                  <ListMusic size={29} />
+                </div>
+                <div className="eyebrow">МУЗЫКА, КОТОРАЯ ОБЪЕДИНЯЕТ</div>
+                <h2 id="modal-title">Новый плейлист</h2>
+                <p>У каждой истории есть свой саундтрек. Как назовём твой?</p>
+                <form onSubmit={createPlaylist}>
+                  <label htmlFor="playlist-name">Название</label>
+                  <input
+                    autoFocus
+                    id="playlist-name"
+                    placeholder="Например, воскресенье без планов"
+                    maxLength={60}
+                    required
+                    value={newPlaylistName}
+                    onChange={(event) => setNewPlaylistName(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') createPlaylist(event)
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={createPlaylist}
+                    className="primary-button"
+                    disabled={!newPlaylistName.trim()}
+                  >
+                    <Plus size={17} />
+                    Создать плейлист
+                  </button>
+                </form>
+              </>
+            ) : dialog === 'add' ? (
+              <>
+                <div className="modal-icon">
+                  <Plus size={27} />
+                </div>
+                <h2 id="modal-title">Сохранить в плейлист</h2>
+                <p>{addTrack ? byId(addTrack)?.title : ''} останется рядом</p>
+                <div className="add-playlist-list">
+                  {myPlaylists.map((playlist) => (
+                    <button key={playlist.id} onClick={() => addToPlaylist(playlist.id)}>
+                      <Artwork kind={playlist.artwork} />
+                      <span>
+                        {playlist.title}
+                        <small>{playlist.tracks.length} треков</small>
+                      </span>
+                      {playlist.tracks.includes(addTrack ?? '') ? (
+                        <Check size={18} />
+                      ) : (
+                        <Plus size={18} />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="modal-icon">
+                  <Waves size={31} />
+                </div>
+                <div className="eyebrow">ПРИЯТНО ПОЗНАКОМИТЬСЯ</div>
+                <h2 id="modal-title">Это твоя Volna.</h2>
+                <p>
+                  Музыкальное приложение с персональными подборками, плейлистами и музыкой под
+                  настроение.
+                </p>
+                <div className="about-details">
+                  <span>
+                    <Music2 size={18} />8 оригинальных инструментальных демотреков
+                  </span>
+                  <span>
+                    <Sparkles size={18} />
+                    Рекомендации на основе твоего вкуса
+                  </span>
+                  <span>
+                    <Heart size={18} />
+                    Коллекция хранится на твоём устройстве
+                  </span>
+                  <span>
+                    <ArrowDownToLine size={18} />
+                    Установка и прослушивание офлайн
+                  </span>
+                </div>
+                <p className="about-fine-print">
+                  Встроенный каталог демонстрационный. Поиск YouTube доступен после подключения API.
+                  Коллекция сохраняется на устройстве. Пробел — воспроизведение и пауза.
+                </p>
+                <button className="primary-button" onClick={() => setDialog(null)}>
+                  Поймать волну <ArrowRight size={17} />
+                </button>
+              </>
+            )}
+          </section>
+        </div>
+      )}
+      {toast && (
+        <div className="toast" role="status">
+          <span className="toast-icon">
+            <Check size={17} />
+          </span>
+          {toast}
+          <button
+            className="icon-button"
+            aria-label="Закрыть уведомление"
+            onClick={() => setToast('')}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+      <audio
+        ref={audio}
+        src={current.audio}
+        preload="metadata"
+        onTimeUpdate={() => setProgress(audio.current?.currentTime ?? 0)}
+        onLoadedMetadata={() => setDuration(audio.current?.duration || current.duration)}
+        onPlay={() => {
+          setPlaying(true)
+          setHistory((previous) =>
+            [current.id, ...previous.filter((id) => id !== current.id)].slice(0, 50),
+          )
+        }}
+        onPlaying={() => setLoading(false)}
+        onWaiting={() => {
+          if (playing) setLoading(true)
+        }}
+        onPause={() => {
+          setPlaying(false)
+          setLoading(false)
+        }}
+        onEnded={() => {
+          if (repeat && audio.current) {
+            audio.current.currentTime = 0
+            void audio.current.play()
+          } else if (queue.length > 1) nextTrack()
+          else setPlaying(false)
+        }}
+        onError={() => {
+          setPlaying(false)
+          setLoading(false)
+          notify('Аудиофайл недоступен. Попробуй другой трек.')
+        }}
+      />
+    </div>
+  )
+}
