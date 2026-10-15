@@ -1,8 +1,11 @@
 {
   "name": "volna-music",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
+  "main": "desktop/main.mjs",
+  "description": "Volna music player with personal discovery and library import",
+  "author": "Volna",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build && node scripts/build-sw.mjs",
@@ -11,6 +14,9 @@
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:wave:live": "node scripts/check-live-wave.mjs",
+    "desktop:win": "npm run build && electron-builder --config electron-builder.json --win portable --x64",
+    "release:windows": "npm run export:html && electron-builder --config electron-builder.json --win portable --x64 && python3 scripts/package_release.py --windows",
     "format": "prettier --write src server e2e scripts/*.mjs *.ts *.json index.html public/manifest.webmanifest README.md"
   },
   "dependencies": {
@@ -18,6 +24,7 @@
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "undici": "^6.21.3",
     "youtubei.js": "18.1.0"
   },
   "devDependencies": {
@@ -25,9 +32,10 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.5.0",
+    "electron": "44.7.2",
+    "electron-builder": "26.15.3",
     "prettier": "^3.6.2",
     "typescript": "~5.8.3",
-    "undici": "^6.21.3",
     "vite": "^6.3.0",
     "vitest": "^3.2.0"
   }

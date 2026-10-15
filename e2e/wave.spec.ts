@@ -3,7 +3,14 @@ import { readFile } from 'node:fs/promises'
 
 test.use({ serviceWorkers: 'block' })
 
-async function provider(page: Page, settings = { unavailable: false, slowInitial: false }) {
+async function provider(
+  page: Page,
+  settings: {
+    unavailable: boolean
+    slowInitial: boolean
+    totalReleases?: number
+  } = { unavailable: false, slowInitial: false },
+) {
   const searches: string[] = []
   await page.route('https://archive.org/advancedsearch.php?**', (route) => {
     const url = new URL(route.request().url())
@@ -16,11 +23,13 @@ async function provider(page: Page, settings = { unavailable: false, slowInitial
         ? 'energy'
         : 'all'
     const number = Number(url.searchParams.get('page'))
+    const total = settings.totalReleases ?? 240
+    const length = Math.max(0, Math.min(24, total - (number - 1) * 24))
     return route.fulfill({
       json: {
         response: {
-          numFound: 240,
-          docs: Array.from({ length: 24 }, (_, n) => ({
+          numFound: total,
+          docs: Array.from({ length }, (_, n) => ({
             identifier: `${kind}-${(number - 1) * 24 + n}`,
             title: `Album ${kind}-${(number - 1) * 24 + n}`,
           })),
@@ -71,6 +80,47 @@ async function provider(page: Page, settings = { unavailable: false, slowInitial
   })
   return searches
 }
+
+test('discovers 120 distinct tracks across catalogue pages, persists them, and plays from the complete queue', async ({
+  page,
+}) => {
+  test.setTimeout(60000)
+  await provider(page, { unavailable: false, slowInitial: false, totalReleases: 60 })
+  const requestedPages = new Set<number>()
+  page.on('request', (request) => {
+    if (request.url().startsWith('https://archive.org/advancedsearch.php?'))
+      requestedPages.add(Number(new URL(request.url()).searchParams.get('page')))
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: /Сосредоточиться/ }).click()
+  for (let batch = 0; batch < 10; batch++) {
+    if (batch) await page.getByRole('button', { name: 'Обновить волну', exact: true }).click()
+    await expect(page.locator('.track-info strong').first()).toHaveText(
+      `Discovery focus-${batch * 6}-0`,
+    )
+    await expect(page.locator('.wave-status')).toContainText('12 новых треков')
+    const stored = await page.evaluate(
+      () => JSON.parse(localStorage.getItem('volna.online-tracks') || '[]') as { id: string }[],
+    )
+    expect(stored).toHaveLength((batch + 1) * 12)
+    expect(new Set(stored.map((track) => track.id)).size).toBe(stored.length)
+  }
+  expect([...requestedPages]).toEqual([1, 2, 3])
+  await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('Discovery focus-')
+  await expect(page.locator('.track-row')).toHaveCount(120)
+  await page.getByRole('button', { name: 'Слушать Discovery focus-59-1', exact: true }).click()
+  await expect
+    .poll(() => page.locator('audio').evaluate((audio: HTMLAudioElement) => audio.currentTime))
+    .toBeGreaterThan(0.1)
+  await expect(page.locator('.player-track-info strong')).toHaveText('Discovery focus-59-1')
+  await page.getByRole('button', { name: 'Следующий трек', exact: true }).click()
+  await expect(page.locator('.player-track-info strong')).toHaveText('Discovery focus-0-0')
+  await page.getByRole('button', { name: 'Очередь воспроизведения' }).click()
+  await expect(page.locator('.queue-track')).toHaveCount(119)
+  await page.reload()
+  await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('Discovery focus-')
+  await expect(page.locator('.track-row')).toHaveCount(120)
+})
 
 async function openWave(page: Page) {
   await page.goto('/')

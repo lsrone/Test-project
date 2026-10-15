@@ -10,7 +10,7 @@ export interface Track {
   audio: string
   duration: number
   moods: Mood[]
-  source?: 'archive'
+  source?: 'archive' | 'yandex'
   sourceUrl?: string
   artworkUrl?: string
   album?: string

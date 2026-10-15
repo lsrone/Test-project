@@ -1,0 +1,16 @@
+{
+  "appId": "app.volna.music",
+  "productName": "Volna",
+  "copyright": "Copyright © 2026 Volna",
+  "directories": { "output": "desktop-dist" },
+  "files": ["dist/**/*", "desktop/**/*", "server/**/*.mjs", "package.json"],
+  "asar": true,
+  "compression": "maximum",
+  "win": {
+    "target": [{ "target": "portable", "arch": ["x64"] }],
+    "icon": "public/app-icon-512.png",
+    "signAndEditExecutable": false,
+    "artifactName": "Volna-${version}-Windows-x64.exe"
+  },
+  "portable": { "requestExecutionLevel": "user" }
+}

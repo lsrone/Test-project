@@ -21,6 +21,22 @@ describe('personal recommendations', () => {
     expect(recommend([], [], [])).toEqual([])
     expect(recommend(tracks, ['deleted-track'], ['deleted-track'])).toHaveLength(tracks.length)
   })
+  it('personalizes 128 tracks without duplicates and filters the full collection by mood', () => {
+    const catalog = Array.from({ length: 128 }, (_, index) => ({
+      ...tracks[index % tracks.length],
+      id: `scale-${index}`,
+      title: `Scale track ${index}`,
+    }))
+    const recent = ['scale-1', 'scale-7']
+    const ranked = recommend(catalog, ['scale-1'], recent)
+    expect(ranked).toHaveLength(128)
+    expect(new Set(ranked.map((track) => track.id)).size).toBe(128)
+    expect(ranked[0].genre).toBe('Эмбиент')
+    expect(recent).not.toContain(ranked[0].id)
+    const focused = recommend(catalog, ['scale-1'], recent, 'focus')
+    expect(focused).toHaveLength(64)
+    expect(focused.every((track) => track.moods.includes('focus'))).toBe(true)
+  })
 })
 
 describe('catalog search', () => {

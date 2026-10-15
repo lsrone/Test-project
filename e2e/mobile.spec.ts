@@ -1,5 +1,26 @@
 import { test, expect } from '@playwright/test'
 
+test('mobile collection imports a CSV library without horizontal overflow', async ({ page }) => {
+  await page.goto('/')
+  await page.locator('.mobile-nav').getByRole('button', { name: 'Коллекция' }).click()
+  await page
+    .locator('.collection-controls')
+    .getByRole('button', { name: 'Перенести библиотеку', exact: true })
+    .click()
+  await page
+    .getByLabel('Файл экспорта Яндекс Музыки')
+    .setInputFiles({
+      name: 'Моя музыка.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from('Название;Исполнитель\nНочной рейс;Группа\nЛетний свет;Другой артист'),
+    })
+  await page.getByRole('button', { name: 'Перенести 2 треков', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Библиотека уже здесь' })).toBeVisible()
+  await page.getByRole('button', { name: 'Открыть перенесённую коллекцию' }).click()
+  await expect(page.locator('.track-row')).toHaveCount(2)
+  expect(await page.evaluate(() => document.body.scrollWidth <= innerWidth)).toBe(true)
+})
+
 test('mobile app fits the screen, plays music and navigates the collection', async ({ page }) => {
   await page.goto('/')
   await expect(page.locator('.mobile-nav')).toBeVisible()

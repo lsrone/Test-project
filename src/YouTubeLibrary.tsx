@@ -31,6 +31,15 @@ export function YouTubeLibrary({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const request = useRef<AbortController | null>(null)
+  const automaticQuery = useRef('')
+
+  useEffect(() => {
+    if (configured && initialQuery.trim().length > 1 && automaticQuery.current !== initialQuery) {
+      automaticQuery.current = initialQuery
+      setQuery(initialQuery)
+      void find(initialQuery)
+    }
+  }, [configured, initialQuery])
 
   useEffect(() => {
     const controller = new AbortController()

@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Clock3,
   Compass,
+  FileUp,
   Headphones,
   Heart,
   Home,
@@ -52,6 +53,13 @@ import { YouTubeLibrary, YouTubePlayer } from './YouTubeLibrary'
 import { isPortable, youtubeUrl, type YouTubeVideo } from './youtube'
 import OpenLibrary from './OpenLibrary'
 import { useWave } from './useWave'
+import { LibraryImport } from './LibraryImport'
+import {
+  persistLibraryImport,
+  prepareLibraryImport,
+  type ImportOptions,
+  type LibraryFile,
+} from './libraryImport'
 import {
   downloadTrack,
   listSavedTracks,
@@ -70,6 +78,7 @@ type Page =
   | 'search'
   | 'youtube'
   | 'downloads'
+  | 'import'
 type Route = { page: Page; playlistId?: string }
 type InstallEvent = Event & {
   prompt: () => Promise<void>
@@ -143,7 +152,9 @@ export default function App() {
   const playbackRequest = useRef(0)
   const offlineUrls = useRef(new Map<string, string>())
   const [volume, setVolume] = useStoredState('volna.volume', 0.7)
-  const [queue, setQueue] = useState(tracks.map((t) => t.id))
+  const [queue, setQueue] = useState(
+    tracks.filter((track) => track.source !== 'yandex').map((t) => t.id),
+  )
   const [waveActive, setWaveActive] = useState(false)
   const [playing, setPlaying] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -167,14 +178,22 @@ export default function App() {
   const main = useRef<HTMLElement>(null)
   const current = tracks.find((t) => t.id === currentId) ?? demoTracks[0]
   const effectiveAudio =
-    audioOverride?.id === current.id
-      ? audioOverride.src
-      : current.source === 'archive' &&
-          (saved === null || saved.some((item) => item.id === current.id))
-        ? undefined
-        : current.audio
+    current.source === 'yandex'
+      ? undefined
+      : audioOverride?.id === current.id
+        ? audioOverride.src
+        : current.source === 'archive' &&
+            (saved === null || saved.some((item) => item.id === current.id))
+          ? undefined
+          : current.audio
   const recommended = useMemo(
-    () => recommend(tracks, liked, history, mood),
+    () =>
+      recommend(
+        tracks.filter((track) => track.source !== 'yandex'),
+        liked,
+        history,
+        mood,
+      ),
     [tracks, liked, history, mood],
   )
   const selectedPlaylist = [...playlists, ...myPlaylists].find((p) => p.id === route.playlistId)
@@ -187,6 +206,7 @@ export default function App() {
     ])
   }
   const wave = useWave({
+    // Imported metadata is retained in the library; wave discovery still needs playable audio.
     enabled: page === 'radio' || waveActive,
     tracks,
     liked,
@@ -265,6 +285,14 @@ export default function App() {
   function openCatalog(text = '') {
     setCatalogQuery(text)
     navigate('browse')
+  }
+  function importLibrary(file: LibraryFile, options: ImportOptions) {
+    const result = prepareLibraryImport(file, options, onlineTracks, myPlaylists, liked)
+    persistLibraryImport(result)
+    setOnlineTracks(result.onlineTracks)
+    setMyPlaylists(result.playlists)
+    setLiked(result.liked)
+    return result
   }
   function openYouTube(text = '') {
     setYoutubeQuery(text)
@@ -346,6 +374,22 @@ export default function App() {
   }
   async function playTrack(track: Track, list?: string[], fromWave = false) {
     if (!track) return
+    if (track.source === 'yandex') {
+      playbackRequest.current++
+      setWaveActive(false)
+      audio.current?.pause()
+      setYoutubeVideo(null)
+      setNowPlaying(false)
+      const text = `${track.artist} ${track.title}`
+      if (isPortable())
+        window.open(
+          `https://www.youtube.com/results?search_query=${encodeURIComponent(text)}`,
+          '_blank',
+          'noopener,noreferrer',
+        )
+      else openYouTube(text)
+      return
+    }
     setWaveActive(fromWave)
     const request = ++playbackRequest.current
     setYoutubeVideo(null)
@@ -367,7 +411,7 @@ export default function App() {
     }
     if (request !== playbackRequest.current) return
     autoplay.current = true
-    if (list?.length) setQueue(list)
+    if (list?.length) setQueue(list.filter((id) => byId(id)?.source !== 'yandex'))
     setAudioOverride({ id: track.id, src: source })
     if (current.id === track.id && effectiveAudio === source) {
       void audio.current?.play().catch(() => {
@@ -386,7 +430,9 @@ export default function App() {
       audio.current.currentTime = 0
       return
     }
-    const candidates = queue.filter((id) => tracks.some((t) => t.id === id))
+    const candidates = queue.filter((id) =>
+      tracks.some((t) => t.id === id && t.source !== 'yandex'),
+    )
     if (!candidates.length) return
     const index = candidates.indexOf(current.id)
     const next =
@@ -613,11 +659,17 @@ export default function App() {
                   page === 'radio',
                 )
               }
-              aria-label={`Слушать ${track.title}`}
+              aria-label={
+                track.source === 'yandex'
+                  ? `Найти ${track.title} на YouTube`
+                  : `Слушать ${track.title}`
+              }
             >
               <Artwork kind={track.artwork} image={track.artworkUrl} />
               <span>
-                {current.id === track.id && playing ? (
+                {track.source === 'yandex' ? (
+                  <Search size={18} />
+                ) : current.id === track.id && playing ? (
                   <AudioLines size={20} />
                 ) : (
                   <Play size={18} fill="currentColor" />
@@ -704,15 +756,17 @@ export default function App() {
                         Источник и условия
                       </a>
                     )}
-                    <button
-                      onClick={() => {
-                        setQueue((previous) => [...previous, track.id])
-                        setMenuTrack(null)
-                        notify('Трек добавлен в очередь')
-                      }}
-                    >
-                      <ListMusic size={16} /> В очередь
-                    </button>
+                    {track.source !== 'yandex' && (
+                      <button
+                        onClick={() => {
+                          setQueue((previous) => [...previous, track.id])
+                          setMenuTrack(null)
+                          notify('Трек добавлен в очередь')
+                        }}
+                      >
+                        <ListMusic size={16} /> В очередь
+                      </button>
+                    )}
                     <button
                       onClick={() => {
                         setAddTrack(track.id)
@@ -722,22 +776,23 @@ export default function App() {
                     >
                       <Plus size={16} /> В плейлист
                     </button>
-                    {selectedPlaylist?.id.startsWith('custom-') && (
-                      <button
-                        onClick={() => {
-                          setMyPlaylists((previous) =>
-                            previous.map((p) =>
-                              p.id === selectedPlaylist.id
-                                ? { ...p, tracks: p.tracks.filter((id) => id !== track.id) }
-                                : p,
-                            ),
-                          )
-                          setMenuTrack(null)
-                        }}
-                      >
-                        <X size={16} /> Удалить из плейлиста
-                      </button>
-                    )}
+                    {selectedPlaylist &&
+                      myPlaylists.some((playlist) => playlist.id === selectedPlaylist.id) && (
+                        <button
+                          onClick={() => {
+                            setMyPlaylists((previous) =>
+                              previous.map((p) =>
+                                p.id === selectedPlaylist.id
+                                  ? { ...p, tracks: p.tracks.filter((id) => id !== track.id) }
+                                  : p,
+                              ),
+                            )
+                            setMenuTrack(null)
+                          }}
+                        >
+                          <X size={16} /> Удалить из плейлиста
+                        </button>
+                      )}
                   </div>
                 </>
               )}
@@ -783,6 +838,7 @@ export default function App() {
     search: 'Поиск',
     youtube: 'YouTube',
     downloads: 'Скачанное',
+    import: 'Перенос библиотеки',
   }
   const playlistScore = (playlist: Playlist) =>
     playlist.tracks.reduce(
@@ -846,6 +902,13 @@ export default function App() {
         </nav>
         <div className="sidebar-section-title">МОЯ КОЛЛЕКЦИЯ</div>
         <nav className="collection-nav" aria-label="Медиатека">
+          <button
+            className={`nav-item ${page === 'import' ? 'selected' : ''}`}
+            onClick={() => navigate('import')}
+          >
+            <FileUp size={20} strokeWidth={1.7} />
+            <span>Перенести библиотеку</span>
+          </button>
           <button
             className={`nav-item ${page === 'downloads' ? 'selected' : ''}`}
             onClick={() => navigate('downloads')}
@@ -1021,6 +1084,12 @@ export default function App() {
         </header>
 
         <main ref={main} className={`main-content ${queueOpen ? 'with-queue' : ''}`}>
+          {page === 'import' && (
+            <LibraryImport
+              onImport={importLibrary}
+              onOpen={(playlistId) => navigate(playlistId ? 'playlist' : 'liked', playlistId)}
+            />
+          )}
           {page === 'youtube' && (
             <YouTubeLibrary initialQuery={youtubeQuery} onPlay={playYouTube} />
           )}
@@ -1028,7 +1097,7 @@ export default function App() {
             <OpenLibrary
               key={catalogQuery}
               initialQuery={catalogQuery}
-              savedTracks={onlineTracks}
+              savedTracks={onlineTracks.filter((track) => track.source === 'archive')}
               onImport={importTracks}
               onPlay={playTrack}
               renderTracks={renderTrackRows}
@@ -1395,6 +1464,12 @@ export default function App() {
                 </div>
               </div>
               <div className="collection-controls">
+                {page === 'liked' && (
+                  <button className="text-button" onClick={() => navigate('import')}>
+                    <FileUp size={18} />
+                    Перенести библиотеку
+                  </button>
+                )}
                 {page === 'liked' && (
                   <button className="text-button" onClick={() => navigate('downloads')}>
                     <ArrowDownToLine size={18} />

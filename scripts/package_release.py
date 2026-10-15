@@ -2,6 +2,13 @@
 from pathlib import Path
 from shutil import copyfile
 from zipfile import ZipFile, ZIP_DEFLATED
+import argparse
+import hashlib
+import json
+
+arguments = argparse.ArgumentParser()
+arguments.add_argument('--windows', action='store_true', help='Include the built Windows executable')
+options = arguments.parse_args()
 
 ROOT = Path(__file__).resolve().parent.parent
 exports = ROOT / 'exports'
@@ -22,6 +29,9 @@ notes = '''VOLNA — музыка на твоей волне
 6. «Моя волна» автоматически ищет новые записи по настроению и вкусу.
    «Обновить волну» загружает следующую партию, не прерывая текущий трек.
    Во время прослушивания волны очередь пополняется автоматически.
+7. «Перенести библиотеку» читает CSV/JSON из Яндекс Музыки, сохраняет плейлисты
+   и избранное. Для импортированных записей доступен поиск на YouTube.
+   Аудиофайлы и подписка Яндекс Музыки в экспорт не входят.
 
 Восемь демотреков встроены и доступны без сети. Онлайн-каталог требует интернет
 до скачивания треков; он не содержит все существующие коммерческие записи.
@@ -49,3 +59,27 @@ for name in ['Volna.html', 'Volna.zip']:
     target = release / name
     target.chmod(0o644)
     print(f'{target.relative_to(ROOT)}: {target.stat().st_size:,} bytes')
+
+names = ['Volna.html', 'Volna.zip']
+if options.windows:
+    version = json.loads((ROOT / 'package.json').read_text())['version']
+    name = f'Volna-{version}-Windows-x64.exe'
+    source = ROOT / 'desktop-dist' / name
+    if not source.is_file():
+        raise SystemExit('Build the Windows application first: npm run desktop:win')
+    with source.open('rb') as executable:
+        if executable.read(2) != b'MZ':
+            raise SystemExit('The Windows artifact is not a PE executable.')
+    copyfile(source, release / name)
+    (release / name).chmod(0o644)
+    names.append(name)
+    print(f'releases/{name}: {source.stat().st_size:,} bytes')
+
+checksums = []
+for name in names:
+    digest = hashlib.sha256()
+    with (release / name).open('rb') as artifact:
+        for chunk in iter(lambda: artifact.read(1024 * 1024), b''):
+            digest.update(chunk)
+    checksums.append(f'{digest.hexdigest()}  {name}')
+(release / 'SHA256SUMS').write_text('\n'.join(checksums) + '\n')
