@@ -1,7 +1,17 @@
-import { EnvHttpProxyAgent, fetch as proxyFetch } from 'undici'
+import { EnvHttpProxyAgent } from 'undici'
+import { createPublicYouTubeSearch, ExpiredYouTubePage } from './public-youtube.mjs'
 
 const agent = new EnvHttpProxyAgent()
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/
+
+function proxyFetch(input, options = {}) {
+  const signals = [AbortSignal.timeout(12000), options.signal, input?.signal].filter(Boolean)
+  return globalThis.fetch(input, {
+    ...options,
+    dispatcher: agent,
+    signal: AbortSignal.any(signals),
+  })
+}
 
 function decodeTitle(value = '') {
   const entities = { amp: '&', quot: '"', apos: "'", lt: '<', gt: '>' }
@@ -16,10 +26,11 @@ function decodeTitle(value = '') {
 
 export function createYouTubeApi({
   getApiKey = () => process.env.YOUTUBE_API_KEY,
-  fetcher = (url, options) => proxyFetch(url, { ...options, dispatcher: agent }),
+  fetcher = proxyFetch,
   now = Date.now,
 } = {}) {
   const cache = new Map()
+  const publicSearch = createPublicYouTubeSearch({ fetcher, now })
   const reply = (res, status, data) => {
     res.statusCode = status
     res.setHeader('Content-Type', 'application/json; charset=utf-8')
@@ -34,24 +45,39 @@ export function createYouTubeApi({
     if (req.method !== 'GET') return reply(res, 405, { message: 'Разрешены только GET-запросы.' })
     const key = getApiKey()
     if (request.pathname === '/api/youtube/status')
-      return reply(res, 200, { configured: Boolean(key) })
+      return reply(res, 200, { configured: true, mode: key ? 'official' : 'public' })
     if (request.pathname !== '/api/youtube/search')
       return reply(res, 404, { message: 'Такого запроса нет.' })
-    if (!key)
-      return reply(res, 503, {
-        code: 'KEY_REQUIRED',
-        message:
-          'Для поиска нужно подключить YouTube Data API в настройках среды. Пока можно открыть видео по ссылке.',
-      })
-
     const query = request.searchParams.get('q')?.trim() || ''
     const pageToken = request.searchParams.get('pageToken') || ''
     if (query.length < 2 || query.length > 120 || !/^[A-Za-z0-9_=-]{0,200}$/.test(pageToken)) {
       return reply(res, 400, { message: 'Введи от 2 до 120 символов для поиска.' })
     }
-    const cacheKey = JSON.stringify([query.toLocaleLowerCase(), pageToken])
+    const cacheKey = JSON.stringify([
+      key ? 'official' : 'public',
+      query.toLocaleLowerCase(),
+      pageToken,
+    ])
     const cached = cache.get(cacheKey)
     if (cached && cached.expires > now()) return reply(res, 200, cached.data)
+
+    function remember(data) {
+      if (cache.size >= 100) cache.delete(cache.keys().next().value)
+      cache.set(cacheKey, { data, expires: now() + 15 * 60 * 1000 })
+      return reply(res, 200, data)
+    }
+
+    if (!key) {
+      try {
+        return remember(await publicSearch(query, pageToken))
+      } catch (error) {
+        if (error instanceof ExpiredYouTubePage)
+          return reply(res, 410, { message: 'Список устарел. Запусти поиск заново.' })
+        return reply(res, 502, {
+          message: 'Поиск YouTube сейчас недоступен. Попробуй позже или открой поиск на YouTube.',
+        })
+      }
+    }
 
     const endpoint = new URL('https://www.googleapis.com/youtube/v3/search')
     endpoint.search = new URLSearchParams({
@@ -95,9 +121,7 @@ export function createYouTubeApi({
           })),
         nextPageToken: typeof body.nextPageToken === 'string' ? body.nextPageToken : undefined,
       }
-      if (cache.size >= 100) cache.delete(cache.keys().next().value)
-      cache.set(cacheKey, { data, expires: now() + 15 * 60 * 1000 })
-      return reply(res, 200, data)
+      return remember(data)
     } catch {
       // Never return upstream URLs or exception messages: they can include the API key.
       return reply(res, 502, {

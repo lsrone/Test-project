@@ -38,3 +38,21 @@ test('portable HTML starts with no external files and plays embedded music in a 
   expect(errors).toEqual([])
   expect(requests).toEqual([])
 })
+
+test('portable YouTube search opens the requested query without a server or key', async ({
+  page,
+  context,
+}) => {
+  await context.route('https://www.youtube.com/**', (route) =>
+    route.fulfill({ contentType: 'text/html', body: '<p>YouTube search fixture</p>' }),
+  )
+  await page.setContent(await readFile('exports/Volna.html', 'utf8'))
+  await page.locator('.primary-nav').getByRole('button', { name: 'YouTube', exact: true }).click()
+  await page.getByRole('textbox', { name: 'Поиск на YouTube или ссылка' }).fill('джаз пианино')
+  const opened = context.waitForEvent('page')
+  await page.getByRole('button', { name: 'Открыть YouTube', exact: true }).click()
+  const youtube = await opened
+  await expect(youtube).toHaveURL(
+    `https://www.youtube.com/results?search_query=${encodeURIComponent('джаз пианино')}`,
+  )
+})

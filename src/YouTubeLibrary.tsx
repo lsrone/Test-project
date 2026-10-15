@@ -17,8 +17,14 @@ interface Results {
   nextPageToken?: string
 }
 
-export function YouTubeLibrary({ onPlay }: { onPlay: (video: YouTubeVideo) => void }) {
-  const [query, setQuery] = useState('')
+export function YouTubeLibrary({
+  onPlay,
+  initialQuery = '',
+}: {
+  onPlay: (video: YouTubeVideo) => void
+  initialQuery?: string
+}) {
+  const [query, setQuery] = useState(initialQuery)
   const [searchedQuery, setSearchedQuery] = useState('')
   const [configured, setConfigured] = useState<boolean | null>(null)
   const [results, setResults] = useState<Results>({ items: [] })
@@ -64,12 +70,16 @@ export function YouTubeLibrary({ onPlay }: { onPlay: (video: YouTubeVideo) => vo
       setError('Введи название, исполнителя или ссылку на YouTube.')
       return
     }
-    if (!configured) {
-      setError(
-        isPortable()
-          ? 'Поиск по каталогу доступен в серверной версии после подключения YouTube API. В этом файле можно открывать YouTube по ссылке.'
-          : 'Для поиска нужно подключить YouTube Data API в настройках среды. Открытие по ссылке работает без ключа.',
+    if (isPortable()) {
+      window.open(
+        `https://www.youtube.com/results?search_query=${encodeURIComponent(text.trim())}`,
+        '_blank',
+        'noopener,noreferrer',
       )
+      return
+    }
+    if (!configured) {
+      setError('Поиск приложения недоступен. Можно открыть YouTube или вставить ссылку на видео.')
       return
     }
     request.current?.abort()
@@ -142,14 +152,21 @@ export function YouTubeLibrary({ onPlay }: { onPlay: (video: YouTubeVideo) => vo
               maxLength={500}
               placeholder="Исполнитель, трек или ссылка на YouTube"
               onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  void find(query)
+                }
+              }}
             />
             <button
               className="primary-button"
               disabled={loading || configured === null}
-              type="submit"
+              type="button"
+              onClick={() => void find(query)}
             >
               {loading ? <LoaderCircle size={16} className="spinner" /> : <ArrowRight size={17} />}
-              <span>Найти</span>
+              <span>{isPortable() ? 'Открыть YouTube' : 'Найти'}</span>
             </button>
           </div>
         </form>
@@ -188,10 +205,20 @@ export function YouTubeLibrary({ onPlay }: { onPlay: (video: YouTubeVideo) => vo
             <p>
               {isPortable()
                 ? 'Откроем её на YouTube. Встроенный плеер и поиск доступны в серверной версии приложения.'
-                : 'Встроенный плеер доступен без ключа. Для поиска по всему каталогу подключи YouTube Data API в настройках среды.'}
+                : 'Поиск приложения сейчас недоступен. Открой поиск на YouTube или вставь ссылку на видео для встроенного плеера.'}
             </p>
           </div>
         </div>
+      )}
+      {(error || configured === false) && (
+        <a
+          className="source-link"
+          href={`https://www.youtube.com/results?search_query=${encodeURIComponent(query.trim() || 'music')}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <ExternalLink size={16} /> Открыть поиск на YouTube
+        </a>
       )}
       {searchedQuery && (
         <section className="section">
@@ -256,8 +283,9 @@ export function YouTubeLibrary({ onPlay }: { onPlay: (video: YouTubeVideo) => vo
           <HeadphoneMark />
           <h2>Музыки хватит на любую волну</h2>
           <p>
-            Вставь ссылку на видео, чтобы начать. Поиск открывает музыкальный каталог YouTube, когда
-            API подключён.
+            {isPortable()
+              ? 'Введи название или вставь ссылку — откроем музыку на YouTube.'
+              : 'Введи название, исполнителя или вставь ссылку на видео, чтобы начать.'}
           </p>
         </div>
       )}

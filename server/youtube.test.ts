@@ -17,12 +17,27 @@ async function call(middleware, url: string) {
 }
 
 describe('YouTube API gateway', () => {
-  it('reports missing credentials without calling YouTube', async () => {
+  it('offers public search without requiring credentials or making a status network request', async () => {
     const fetcher = vi.fn()
     const middleware = createYouTubeApi({ getApiKey: () => undefined, fetcher })
-    expect((await call(middleware, '/api/youtube/status')).body).toEqual({ configured: false })
-    expect((await call(middleware, '/api/youtube/search?q=jazz')).status).toBe(503)
+    expect((await call(middleware, '/api/youtube/status')).body).toEqual({
+      configured: true,
+      mode: 'public',
+    })
     expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('keeps public search failures readable without exposing transport details', async () => {
+    const middleware = createYouTubeApi({
+      getApiKey: () => undefined,
+      fetcher: async () => {
+        throw new Error('private transport details')
+      },
+    })
+    const result = await call(middleware, '/api/youtube/search?q=jazz')
+    expect(result.status).toBe(502)
+    expect(result.body.message).toContain('Поиск YouTube сейчас недоступен')
+    expect(JSON.stringify(result)).not.toContain('private transport details')
   })
 
   it('requests embeddable music, paginates, and caches without exposing credentials', async () => {

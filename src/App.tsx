@@ -40,7 +40,7 @@ import {
   initialPlaylists,
   moods,
   playlists,
-  tracks,
+  tracks as demoTracks,
   type Mood,
   type Playlist,
   type Track,
@@ -49,14 +49,30 @@ import { recommend, searchTracks } from './recommendations'
 import { useStoredState } from './storage'
 import { YouTubeLibrary, YouTubePlayer } from './YouTubeLibrary'
 import { isPortable, youtubeUrl, type YouTubeVideo } from './youtube'
+import OpenLibrary from './OpenLibrary'
+import {
+  downloadTrack,
+  listSavedTracks,
+  removeSavedTrack,
+  savedAudio,
+  type SavedTrack,
+} from './offline'
 
-type Page = 'home' | 'browse' | 'radio' | 'liked' | 'history' | 'playlist' | 'search' | 'youtube'
+type Page =
+  | 'home'
+  | 'browse'
+  | 'radio'
+  | 'liked'
+  | 'history'
+  | 'playlist'
+  | 'search'
+  | 'youtube'
+  | 'downloads'
 type Route = { page: Page; playlistId?: string }
 type InstallEvent = Event & {
   prompt: () => Promise<void>
   userChoice: Promise<{ outcome: string }>
 }
-const byId = (id: string) => tracks.find((t) => t.id === id)!
 const time = (seconds: number) =>
   `${Math.floor((seconds || 0) / 60)}:${String(Math.floor((seconds || 0) % 60)).padStart(2, '0')}`
 
@@ -64,13 +80,26 @@ function Artwork({
   kind,
   className = '',
   title,
+  image,
 }: {
   kind: string
   className?: string
   title?: string
+  image?: string
 }) {
   return (
     <div className={`artwork art-${kind} ${className}`} aria-hidden="true">
+      {image && (
+        <img
+          className="remote-artwork"
+          src={image}
+          alt=""
+          loading="lazy"
+          onError={(event) => {
+            event.currentTarget.style.display = 'none'
+          }}
+        />
+      )}
       <div className="art-texture" />
       <div className="art-object" />
       <div className="art-orbit" />
@@ -97,7 +126,20 @@ export default function App() {
     'volna.playlists',
     initialPlaylists,
   )
-  const [currentId, setCurrentId] = useStoredState('volna.current', tracks[0].id)
+  const [onlineTracks, setOnlineTracks] = useStoredState<Track[]>('volna.online-tracks', [])
+  const tracks = useMemo(() => [...onlineTracks, ...demoTracks], [onlineTracks])
+  const byId = (id: string) => tracks.find((track) => track.id === id)!
+  const [currentId, setCurrentId] = useStoredState('volna.current', demoTracks[0].id)
+  const [catalogQuery, setCatalogQuery] = useState('')
+  const [youtubeQuery, setYoutubeQuery] = useState('')
+  const [saved, setSaved] = useState<SavedTrack[] | null>(null)
+  const [download, setDownload] = useState<{ id: string; loaded: number; total: number } | null>(
+    null,
+  )
+  const [audioOverride, setAudioOverride] = useState<{ id: string; src: string } | null>(null)
+  const downloadController = useRef<AbortController | null>(null)
+  const playbackRequest = useRef(0)
+  const offlineUrls = useRef(new Map<string, string>())
   const [volume, setVolume] = useStoredState('volna.volume', 0.7)
   const [queue, setQueue] = useState(tracks.map((t) => t.id))
   const [playing, setPlaying] = useState(false)
@@ -120,10 +162,99 @@ export default function App() {
   const search = useRef<HTMLInputElement>(null)
   const autoplay = useRef(false)
   const main = useRef<HTMLElement>(null)
-  const current = tracks.find((t) => t.id === currentId) ?? tracks[0]
-  const recommended = useMemo(() => recommend(tracks, liked, history, mood), [liked, history, mood])
+  const current = tracks.find((t) => t.id === currentId) ?? demoTracks[0]
+  const effectiveAudio =
+    audioOverride?.id === current.id
+      ? audioOverride.src
+      : current.source === 'archive' &&
+          (saved === null || saved.some((item) => item.id === current.id))
+        ? undefined
+        : current.audio
+  const recommended = useMemo(
+    () => recommend(tracks, liked, history, mood),
+    [tracks, liked, history, mood],
+  )
   const selectedPlaylist = [...playlists, ...myPlaylists].find((p) => p.id === route.playlistId)
-  const searchResults = useMemo(() => searchTracks(tracks, query), [query])
+  const searchResults = useMemo(() => searchTracks(tracks, query), [tracks, query])
+
+  function importTracks(items: Track[]) {
+    setOnlineTracks((previous) => [
+      ...new Map([...previous, ...items].map((track) => [track.id, track])).values(),
+    ])
+  }
+  useEffect(() => {
+    const previous = audioOverride?.src
+    return () => {
+      if (previous?.startsWith('blob:') && ![...offlineUrls.current.values()].includes(previous))
+        URL.revokeObjectURL(previous)
+    }
+  }, [audioOverride?.src])
+  function openCatalog(text = '') {
+    setCatalogQuery(text)
+    navigate('browse')
+  }
+  function openYouTube(text = '') {
+    setYoutubeQuery(text)
+    navigate('youtube')
+  }
+
+  useEffect(() => {
+    let active = true
+    void listSavedTracks()
+      .then((items) => {
+        if (!active) return
+        setSaved(items)
+        if (items.length) importTracks(items.map((item) => item.track))
+      })
+      .catch(() => {
+        if (active) setSaved([])
+      })
+    return () => {
+      active = false
+      downloadController.current?.abort()
+      offlineUrls.current.forEach((url) => URL.revokeObjectURL(url))
+    }
+  }, [])
+
+  async function saveTrack(track: Track) {
+    if (downloadController.current) {
+      notify('Сначала дождись текущего скачивания или отмени его.')
+      return
+    }
+    const controller = new AbortController()
+    downloadController.current = controller
+    setDownload({ id: track.id, loaded: 0, total: 0 })
+    try {
+      const entry = await downloadTrack(track, controller.signal, (progress) =>
+        setDownload({ id: track.id, ...progress }),
+      )
+      setSaved((previous) => [...(previous || []).filter((item) => item.id !== track.id), entry])
+      notify(`${track.title} сохранён для офлайн-прослушивания`)
+    } catch (cause) {
+      if (controller.signal.aborted) notify('Скачивание отменено')
+      else
+        notify(
+          cause instanceof Error && cause.name !== 'TypeError'
+            ? cause.message
+            : 'Источник не разрешил загрузку или нет связи. Попробуй другой трек.',
+        )
+    } finally {
+      setDownload(null)
+      downloadController.current = null
+    }
+  }
+  async function deleteDownload(track: Track) {
+    try {
+      await removeSavedTrack(track.id)
+      setSaved((previous) => (previous || []).filter((item) => item.id !== track.id))
+      const url = offlineUrls.current.get(track.id)
+      if (url && current.id !== track.id) URL.revokeObjectURL(url)
+      offlineUrls.current.delete(track.id)
+      notify('Копия на устройстве удалена')
+    } catch {
+      notify('Не удалось удалить копию. Попробуй ещё раз.')
+    }
+  }
 
   function navigate(next: Page, playlistId?: string) {
     setRoutes((previous) => [...previous.slice(0, routeIndex + 1), { page: next, playlistId }])
@@ -140,11 +271,31 @@ export default function App() {
       previous.includes(id) ? previous.filter((item) => item !== id) : [...previous, id],
     )
   }
-  function playTrack(track: Track, list?: string[]) {
+  async function playTrack(track: Track, list?: string[]) {
+    if (!track) return
+    const request = ++playbackRequest.current
     setYoutubeVideo(null)
+    let source = track.audio
+    if (track.source === 'archive') {
+      try {
+        let local = offlineUrls.current.get(track.id)
+        if (!local) {
+          const blob = await savedAudio(track.id)
+          if (blob) {
+            local = URL.createObjectURL(blob)
+            offlineUrls.current.set(track.id, local)
+          }
+        }
+        if (local) source = local
+      } catch {
+        /* Online playback remains available when local storage is blocked. */
+      }
+    }
+    if (request !== playbackRequest.current) return
     autoplay.current = true
     if (list?.length) setQueue(list)
-    if (current.id === track.id) {
+    setAudioOverride({ id: track.id, src: source })
+    if (current.id === track.id && effectiveAudio === source) {
       void audio.current?.play().catch(() => {
         setLoading(false)
         notify('Не удалось воспроизвести трек. Попробуй ещё раз.')
@@ -241,7 +392,7 @@ export default function App() {
       setLoading(false)
       notify('Не удалось включить музыку. Нажми воспроизведение ещё раз.')
     })
-  }, [current.id])
+  }, [current.id, effectiveAudio])
   useEffect(() => {
     if (audio.current) audio.current.volume = Math.min(1, Math.max(0, volume))
   }, [volume])
@@ -378,7 +529,7 @@ export default function App() {
               }
               aria-label={`Слушать ${track.title}`}
             >
-              <Artwork kind={track.artwork} />
+              <Artwork kind={track.artwork} image={track.artworkUrl} />
               <span>
                 {current.id === track.id && playing ? (
                   <AudioLines size={20} />
@@ -411,7 +562,40 @@ export default function App() {
             >
               <Heart size={17} fill={liked.includes(track.id) ? 'currentColor' : 'none'} />
             </button>
-            <span className="track-duration">{time(track.duration)}</span>
+            {track.source === 'archive' &&
+              (download?.id === track.id ? (
+                <button
+                  className="icon-button download-button downloading"
+                  aria-label={`Отменить скачивание ${track.title}`}
+                  onClick={() => downloadController.current?.abort()}
+                >
+                  <LoaderCircle size={17} className="spinner" />
+                </button>
+              ) : saved?.some((item) => item.id === track.id) ? (
+                <button
+                  className="icon-button download-button downloaded"
+                  aria-label={`Удалить офлайн-копию ${track.title}`}
+                  title="Скачано на устройство"
+                  onClick={() => void deleteDownload(track)}
+                >
+                  <Check size={18} />
+                </button>
+              ) : (
+                <button
+                  className="icon-button download-button"
+                  disabled={!track.downloadAllowed}
+                  aria-label={`Скачать ${track.title} для офлайн`}
+                  title={
+                    track.downloadAllowed
+                      ? 'Сохранить на устройстве'
+                      : 'Нет подтверждённых условий скачивания. См. источник.'
+                  }
+                  onClick={() => void saveTrack(track)}
+                >
+                  <ArrowDownToLine size={17} />
+                </button>
+              ))}
+            <span className="track-duration">{track.duration ? time(track.duration) : '—'}</span>
             <div className="track-actions">
               <button
                 className="icon-button"
@@ -428,6 +612,11 @@ export default function App() {
                     onClick={() => setMenuTrack(null)}
                   />
                   <div className="context-menu">
+                    {track.sourceUrl && (
+                      <a href={track.sourceUrl} target="_blank" rel="noopener noreferrer">
+                        Источник и условия
+                      </a>
+                    )}
                     <button
                       onClick={() => {
                         setQueue((previous) => [...previous, track.id])
@@ -499,13 +688,14 @@ export default function App() {
   }
   const pageTitles: Record<Page, string> = {
     home: 'Главная',
-    browse: 'Обзор',
+    browse: 'Каталог',
     radio: 'Моя волна',
     liked: 'Любимые треки',
     history: 'Недавно слушал',
     playlist: 'Плейлист',
     search: 'Поиск',
     youtube: 'YouTube',
+    downloads: 'Скачанное',
   }
   const playlistScore = (playlist: Playlist) =>
     playlist.tracks.reduce(
@@ -526,9 +716,11 @@ export default function App() {
   const collectionTracks =
     page === 'liked'
       ? liked.map(byId).filter(Boolean)
-      : page === 'history'
-        ? history.map(byId).filter(Boolean)
-        : (selectedPlaylist?.tracks ?? []).map(byId).filter(Boolean)
+      : page === 'downloads'
+        ? (saved || []).map((item) => item.track)
+        : page === 'history'
+          ? history.map(byId).filter(Boolean)
+          : (selectedPlaylist?.tracks ?? []).map(byId).filter(Boolean)
 
   return (
     <div className="app-shell">
@@ -549,7 +741,7 @@ export default function App() {
           {(
             [
               { id: 'home', icon: Home, label: 'Главная' },
-              { id: 'browse', icon: Compass, label: 'Обзор' },
+              { id: 'browse', icon: Compass, label: 'Каталог' },
               { id: 'radio', icon: Radio, label: 'Моя волна' },
               { id: 'youtube', icon: Youtube, label: 'YouTube' },
             ] as const
@@ -567,6 +759,14 @@ export default function App() {
         </nav>
         <div className="sidebar-section-title">МОЯ КОЛЛЕКЦИЯ</div>
         <nav className="collection-nav" aria-label="Медиатека">
+          <button
+            className={`nav-item ${page === 'downloads' ? 'selected' : ''}`}
+            onClick={() => navigate('downloads')}
+          >
+            <ArrowDownToLine size={20} strokeWidth={1.7} />
+            <span>Скачанное</span>
+            {Boolean(saved?.length) && <small>{saved!.length}</small>}
+          </button>
           <button
             className={`nav-item ${page === 'liked' ? 'selected' : ''}`}
             onClick={() => navigate('liked')}
@@ -734,32 +934,42 @@ export default function App() {
         </header>
 
         <main ref={main} className={`main-content ${queueOpen ? 'with-queue' : ''}`}>
-          {page === 'youtube' && <YouTubeLibrary onPlay={playYouTube} />}
-          {(page === 'home' || page === 'browse') && (
+          {page === 'youtube' && (
+            <YouTubeLibrary initialQuery={youtubeQuery} onPlay={playYouTube} />
+          )}
+          {page === 'browse' && (
+            <OpenLibrary
+              key={catalogQuery}
+              initialQuery={catalogQuery}
+              savedTracks={onlineTracks}
+              onImport={importTracks}
+              onPlay={playTrack}
+              renderTracks={renderTrackRows}
+              onYouTube={openYouTube}
+            />
+          )}
+          {page === 'home' && (
             <>
               <div className="page-heading">
                 <div>
                   <div className="eyebrow">ТВОЙ САУНДТРЕК НА СЕГОДНЯ</div>
                   <h1>
-                    {page === 'browse' ? (
-                      'Всегда есть что открыть'
-                    ) : (
+                    {
                       <>
                         Хороший день начинается с музыки<span className="heading-dot">.</span>
                       </>
-                    )}
+                    }
                   </h1>
-                  <p>
-                    {page === 'browse'
-                      ? 'Новые звуки, неожиданные встречи и будущие любимые.'
-                      : 'С возвращением, Алекс. Давай найдём твой ритм.'}
-                  </p>
+                  <p>С возвращением, Алекс. Давай найдём твой ритм.</p>
                 </div>
                 <span className="date-badge">
                   <span /> ТВОЙ МОМЕНТ. ТВОЯ МУЗЫКА.
                 </span>
               </div>
               <div className="feed-tabs" role="tablist" aria-label="Разделы ленты">
+                <button className="catalog-tab" onClick={() => openCatalog()}>
+                  Онлайн-каталог <ArrowRight size={13} />
+                </button>
                 {['Все', 'Для тебя', 'Новинки', 'Плейлисты'].map((name) => (
                   <button
                     key={name}
@@ -795,8 +1005,8 @@ export default function App() {
                     </button>
                     <button
                       className="hero-more"
-                      aria-label="Открыть мою волну"
-                      onClick={() => navigate('radio')}
+                      aria-label="Открыть онлайн-каталог"
+                      onClick={() => openCatalog()}
                     >
                       <ArrowRight size={20} />
                     </button>
@@ -848,14 +1058,7 @@ export default function App() {
                     Смотреть всё <ChevronRight size={16} />
                   </button>
                 </div>
-                <div className="playlist-grid">
-                  {(page === 'browse'
-                    ? tab === 'Плейлисты'
-                      ? myPlaylists
-                      : playlists
-                    : visiblePlaylists
-                  ).map(renderPlaylistCard)}
-                </div>
+                <div className="playlist-grid">{visiblePlaylists.map(renderPlaylistCard)}</div>
               </section>
               <div className="home-lower-grid">
                 <section className="section picked-section">
@@ -986,6 +1189,14 @@ export default function App() {
                   </p>
                 </div>
               </div>
+              <div className="search-online-actions">
+                <button className="primary-button" onClick={() => openCatalog(query)}>
+                  Искать в онлайн-каталоге <ArrowRight size={16} />
+                </button>
+                <button className="text-button" onClick={() => openYouTube(query)}>
+                  Искать на YouTube <Youtube size={16} />
+                </button>
+              </div>
               {!query && (
                 <div className="search-suggestions">
                   {['Электроника', 'Лоу-фай', 'Эмбиент', 'Хаус'].map((item) => (
@@ -1017,11 +1228,16 @@ export default function App() {
             </>
           )}
 
-          {(page === 'liked' || page === 'history' || page === 'playlist') && (
+          {(page === 'liked' ||
+            page === 'history' ||
+            page === 'playlist' ||
+            page === 'downloads') && (
             <>
               <div className={`collection-hero collection-${page}`}>
                 <div className="collection-art">
-                  {page === 'liked' ? (
+                  {page === 'downloads' ? (
+                    <ArrowDownToLine size={74} strokeWidth={1} />
+                  ) : page === 'liked' ? (
                     <Heart size={74} fill="currentColor" strokeWidth={1} />
                   ) : page === 'history' ? (
                     <Clock3 size={74} strokeWidth={1} />
@@ -1042,11 +1258,13 @@ export default function App() {
                       : pageTitles[page]}
                   </h1>
                   <p>
-                    {page === 'liked'
-                      ? 'Всё, что попало в самое сердце.'
-                      : page === 'history'
-                        ? 'Всегда приятно вернуться к хорошему.'
-                        : selectedPlaylist?.description}
+                    {page === 'downloads'
+                      ? 'Копии на этом устройстве. Можно слушать без интернета.'
+                      : page === 'liked'
+                        ? 'Всё, что попало в самое сердце.'
+                        : page === 'history'
+                          ? 'Всегда приятно вернуться к хорошему.'
+                          : selectedPlaylist?.description}
                   </p>
                   <div className="collection-meta">
                     <span className="small-avatar">А</span>
@@ -1058,6 +1276,12 @@ export default function App() {
                 </div>
               </div>
               <div className="collection-controls">
+                {page === 'liked' && (
+                  <button className="text-button" onClick={() => navigate('downloads')}>
+                    <ArrowDownToLine size={18} />
+                    Скачанное
+                  </button>
+                )}
                 <button
                   className="large-play"
                   disabled={!collectionTracks.length}
@@ -1095,6 +1319,21 @@ export default function App() {
                   {collectionTracks.length} треков
                 </span>
               </div>
+              {page === 'downloads' && (
+                <div className="offline-explanation">
+                  <ArrowDownToLine size={19} />
+                  <span>
+                    {saved?.length || 0} треков ·{' '}
+                    {(
+                      (saved || []).reduce((size, item) => size + item.size, 0) /
+                      1024 /
+                      1024
+                    ).toFixed(1)}{' '}
+                    МБ на устройстве. Сохраняем полные файлы, а не только обложки. Удалить копию
+                    можно кнопкой с галочкой рядом с треком.
+                  </span>
+                </div>
+              )}
               {collectionTracks.length ? (
                 <>
                   <div className="table-heading">
@@ -1113,16 +1352,20 @@ export default function App() {
                     <Music2 size={44} strokeWidth={1} />
                   )}
                   <h2>
-                    {page === 'liked'
-                      ? 'Здесь будет твоя любимая музыка'
-                      : page === 'history'
-                        ? 'Начни свою музыкальную историю'
-                        : 'Начало чего-то хорошего'}
+                    {page === 'downloads'
+                      ? 'Пока ничего не скачано'
+                      : page === 'liked'
+                        ? 'Здесь будет твоя любимая музыка'
+                        : page === 'history'
+                          ? 'Начни свою музыкальную историю'
+                          : 'Начало чего-то хорошего'}
                   </h2>
                   <p>
-                    {page === 'liked'
-                      ? 'Нажимай на сердечко рядом с треком — он останется здесь.'
-                      : 'Открой каталог и найди треки, которые захочется слушать снова.'}
+                    {page === 'downloads'
+                      ? 'Открой релиз в онлайн-каталоге и нажми стрелку скачивания рядом с разрешённым треком.'
+                      : page === 'liked'
+                        ? 'Нажимай на сердечко рядом с треком — он останется здесь.'
+                        : 'Открой каталог и найди треки, которые захочется слушать снова.'}
                   </p>
                   <button className="primary-button" onClick={() => navigate('browse')}>
                     Открыть музыку <ArrowRight size={17} />
@@ -1149,7 +1392,7 @@ export default function App() {
           </div>
           <div className="eyebrow">СЕЙЧАС ИГРАЕТ</div>
           <div className="queue-current">
-            <Artwork kind={current.artwork} />
+            <Artwork kind={current.artwork} image={current.artworkUrl} />
             <div>
               <strong>{current.title}</strong>
               <span>{current.artist}</span>
@@ -1166,7 +1409,7 @@ export default function App() {
             {queue.slice(queue.indexOf(current.id) + 1).map((id, index) => (
               <div className="queue-track" key={`${id}-${index}`}>
                 <button onClick={() => playTrack(byId(id))}>
-                  <Artwork kind={byId(id).artwork} />
+                  <Artwork kind={byId(id).artwork} image={byId(id).artworkUrl} />
                   <span>
                     <strong>{byId(id).title}</strong>
                     <small>{byId(id).artist}</small>
@@ -1199,7 +1442,7 @@ export default function App() {
             aria-label="Открыть экран воспроизведения"
             onClick={() => setNowPlaying(true)}
           >
-            <Artwork kind={current.artwork} />
+            <Artwork kind={current.artwork} image={current.artworkUrl} />
             <Maximize2 size={17} />
           </button>
           <div className="player-track-info">
@@ -1354,7 +1597,10 @@ export default function App() {
           <Radio size={21} />
           <span>Моя волна</span>
         </button>
-        <button className={page === 'liked' ? 'active' : ''} onClick={() => navigate('liked')}>
+        <button
+          className={page === 'liked' || page === 'downloads' ? 'active' : ''}
+          onClick={() => navigate('liked')}
+        >
           <Heart size={21} />
           <span>Коллекция</span>
         </button>
@@ -1377,7 +1623,11 @@ export default function App() {
           <div className="eyebrow">
             <AudioLines size={15} /> НА ТВОЕЙ ВОЛНЕ
           </div>
-          <Artwork kind={current.artwork} title={current.title.toUpperCase()} />
+          <Artwork
+            kind={current.artwork}
+            image={current.artworkUrl}
+            title={current.title.toUpperCase()}
+          />
           <h2>{current.title}</h2>
           <p>{current.artist}</p>
           <button
@@ -1505,7 +1755,8 @@ export default function App() {
                 </p>
                 <div className="about-details">
                   <span>
-                    <Music2 size={18} />8 оригинальных инструментальных демотреков
+                    <Music2 size={18} />
+                    Онлайн-каталог и 8 встроенных демотреков
                   </span>
                   <span>
                     <Sparkles size={18} />
@@ -1547,9 +1798,37 @@ export default function App() {
           </button>
         </div>
       )}
+      {download && (
+        <div className="download-status" role="status">
+          <ArrowDownToLine size={20} />
+          <div>
+            <strong>Сохраняем {byId(download.id)?.title}</strong>
+            <span>
+              {(download.loaded / 1024 / 1024).toFixed(1)} МБ
+              {download.total > 0 ? ` из ${(download.total / 1024 / 1024).toFixed(1)} МБ` : ''}
+            </span>
+            <div className="download-progress">
+              <i
+                style={{
+                  width: download.total
+                    ? `${Math.min(100, (download.loaded / download.total) * 100)}%`
+                    : '30%',
+                }}
+              />
+            </div>
+          </div>
+          <button
+            className="icon-button"
+            aria-label="Отменить текущее скачивание"
+            onClick={() => downloadController.current?.abort()}
+          >
+            <X size={17} />
+          </button>
+        </div>
+      )}
       <audio
         ref={audio}
-        src={current.audio}
+        src={effectiveAudio}
         preload="metadata"
         onTimeUpdate={() => setProgress(audio.current?.currentTime ?? 0)}
         onLoadedMetadata={() => setDuration(audio.current?.duration || current.duration)}

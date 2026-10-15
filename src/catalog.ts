@@ -10,6 +10,12 @@ export interface Track {
   audio: string
   duration: number
   moods: Mood[]
+  source?: 'archive'
+  sourceUrl?: string
+  artworkUrl?: string
+  album?: string
+  license?: string
+  downloadAllowed?: boolean
 }
 export interface Playlist {
   id: string
