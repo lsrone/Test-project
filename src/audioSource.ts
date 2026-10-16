@@ -1,9 +1,11 @@
 import type { Track } from './catalog'
+import { youtubeVideoId } from './youtube'
 
 export const isPlayable = (track?: Track): boolean =>
   !!track &&
-  !!track.audio &&
-  (!!track.localAudio || (track.source !== 'youtube' && track.source !== 'yandex'))
+  (!!youtubeVideoId(track) ||
+    (!!track.audio &&
+      (!!track.localAudio || (track.source !== 'youtube' && track.source !== 'yandex'))))
 
 // Canonical URLs stay in saved metadata. A running server proxies only Archive resources.
 export function archiveResource(value: string): string {

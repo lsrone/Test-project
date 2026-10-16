@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
 import { mockArchive } from './archive-fixture'
+import { mockYouTubePlayback } from './youtube-fixture'
 test.use({ serviceWorkers: 'block' })
-test('legacy YouTube likes survive, are not queued as audio, and new playable favourites appear above them', async ({
+test('legacy YouTube likes are playable again and new favourites stay above them', async ({
   page,
 }) => {
   await page.addInitScript(() => {
@@ -28,15 +29,16 @@ test('legacy YouTube likes survive, are not queued as audio, and new playable fa
   const requests: string[] = []
   page.on('request', (r) => requests.push(r.url()))
   await mockArchive(page)
+  await mockYouTubePlayback(page)
   await page.goto('/')
-  await expect(page.locator('.player-track-info strong')).toHaveText('Blue Hour')
+  await expect(page.locator('.player-track-info strong')).toHaveText('Older song')
   await page
     .locator('.collection-nav')
     .getByRole('button', { name: /Любимые треки/ })
     .click()
   await expect(page.locator('.track-info strong')).toHaveText(['Newer song', 'Older song'])
-  await expect(page.locator('.legacy-notice')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Слушать коллекцию', exact: true })).toBeDisabled()
+  await expect(page.locator('.legacy-notice')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Слушать коллекцию', exact: true })).toBeEnabled()
   await expect(page.locator('.collection-meta')).not.toContainText('Алекс')
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('ambient')
   await page.getByRole('tab', { name: 'Аудиокаталог', exact: true }).click()
@@ -54,8 +56,9 @@ test('legacy YouTube likes survive, are not queued as audio, and new playable fa
   await page.getByRole('button', { name: 'Слушать коллекцию', exact: true }).click()
   await expect(page.locator('.player-track-info strong')).toHaveText('Ocean Lights')
   await page.getByRole('button', { name: 'Следующий трек', exact: true }).click()
-  await expect(page.locator('.player-track-info strong')).toHaveText('Ocean Lights')
-  expect(requests.some((url) => /youtube|googlevideo/.test(url))).toBe(false)
+  await expect(page.locator('.player-track-info strong')).toHaveText('Newer song')
+  await expect(page.locator('.player-youtube iframe')).toHaveCount(1)
+  expect(requests.some((url) => /\/api\/youtube\/(audio|resolve)/.test(url))).toBe(false)
 })
 test('an explicit search choice teaches the wave a genre and cached unselected results do not', async ({
   page,

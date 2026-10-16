@@ -166,6 +166,11 @@ test('wave refills the upcoming queue before discoveries run out', async ({ page
   const requests = await provider(page)
   await openWave(page)
   await page.getByRole('button', { name: 'Включить волну', exact: true }).click()
+  // Preference learning needs an observed play, not merely a clicked title.
+  await expect
+    .poll(() => page.locator('audio').evaluate((audio: HTMLAudioElement) => audio.currentTime))
+    .toBeGreaterThan(0.1)
+  expect(requests).toHaveLength(1)
   for (let index = 0; index < 8; index++) {
     const before = await page.locator('.player-track-info strong').textContent()
     await page.getByRole('button', { name: 'Следующий трек', exact: true }).click()

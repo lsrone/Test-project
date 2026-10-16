@@ -89,8 +89,8 @@ export function YouTubeSearch({
         {loading && <LoaderCircle size={20} className="spinner" />}
       </div>
       <p className="catalog-scope">
-        Для прослушивания здесь добавь свой аудиофайл кнопкой на обложке. YouTube не выдаёт
-        отдельное аудио для встроенного плеера без видео.
+        Нажми на запись — она откроется в нижнем плеере Volna. Некоторые авторы запрещают
+        встраивание; для них можно выбрать другую запись.
       </p>
       {query.trim().length >= 2 && (
         <a

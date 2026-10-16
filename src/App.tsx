@@ -57,7 +57,17 @@ import { useStoredState } from './storage'
 import { AudioSearch } from './AudioSearch'
 import { YouTubeSearch } from './YouTubeSearch'
 import { LocalAudioDialog } from './LocalAudioDialog'
-import { youtubeLink, trackSearchQuery, linkImportedTrack } from './youtube'
+import { YouTubePlayback, type YouTubeControls } from './YouTubePlayback'
+import { useYouTubeListening } from './useYouTubeListening'
+import {
+  youtubeLink,
+  youtubeVideoId,
+  trackSearchQuery,
+  linkImportedTrack,
+  matchYouTubeRecording,
+  youtubeTrack,
+  type YouTubeVideo,
+} from './youtube'
 import { archiveResource, isPlayable } from './audioSource'
 import { describePlaybackFailure, type PlaybackFailure } from './playbackFailure'
 import { WaveParticles } from './WaveParticles'
@@ -96,6 +106,7 @@ type InstallEvent = Event & {
 }
 const time = (seconds: number) =>
   `${Math.floor((seconds || 0) / 60)}:${String(Math.floor((seconds || 0) % 60)).padStart(2, '0')}`
+const canStart = (track?: Track) => !!track && (isPlayable(track) || track.source === 'yandex')
 
 function Artwork({
   kind,
@@ -182,9 +193,15 @@ export default function App() {
   const [audioOverride, setAudioOverride] = useState<{ id: string; src: string } | null>(null)
   const downloadController = useRef<AbortController | null>(null)
   const playbackRequest = useRef(0)
+  const matchingRequest = useRef<AbortController | null>(null)
+  const youtubeControls = useRef<YouTubeControls>(null)
+  const [youtubeIntent, setYoutubeIntent] = useState<'play' | 'pause'>('pause')
+  const [youtubeSession, setYoutubeSession] = useState(0)
+  const [youtubeError, setYoutubeError] = useState('')
+  const [youtubeNeedsReload, setYoutubeNeedsReload] = useState(false)
   const offlineUrls = useRef(new Map<string, string>())
   const [volume, setVolume] = useStoredState('volna.volume', 0.7)
-  const [queue, setQueue] = useState(tracks.filter(isPlayable).map((t) => t.id))
+  const [queue, setQueue] = useState(tracks.filter(canStart).map((t) => t.id))
   const [waveActive, setWaveActive] = useState(false)
   const [playing, setPlaying] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -205,8 +222,10 @@ export default function App() {
   const search = useRef<HTMLInputElement>(null)
   const autoplay = useRef(false)
   const main = useRef<HTMLElement>(null)
-  const current = tracks.find((t) => t.id === currentId && isPlayable(t)) ?? demoTracks[0]
-  useListening(current.id, audio, (id, delta) =>
+  const current = tracks.find((t) => t.id === currentId && canStart(t)) ?? demoTracks[0]
+  const videoId = youtubeVideoId(current)
+  const isYouTube = !!videoId
+  const saveListening = (id: string, delta: ListeningStat) =>
     setListening((previous) => {
       const old = previous[id] || { seconds: 0, plays: 0, completions: 0, skips: 0 }
       return {
@@ -218,10 +237,19 @@ export default function App() {
           skips: old.skips + delta.skips,
         },
       }
-    }),
+    })
+  useListening(current.id, audio, saveListening)
+  const youtubeListening = useYouTubeListening(
+    current.id,
+    isYouTube,
+    playing,
+    progress,
+    duration,
+    saveListening,
   )
-  const effectiveAudio =
-    audioOverride?.id === current.id
+  const effectiveAudio = isYouTube
+    ? undefined
+    : audioOverride?.id === current.id
       ? audioOverride.src
       : current.localAudio ||
           (current.source === 'archive' &&
@@ -338,7 +366,7 @@ export default function App() {
   }
   function findAudio(track: Track) {
     setSearchSource('youtube')
-    setMatchingTrackId(track.source === 'yandex' ? track.id : null)
+    setMatchingTrackId(['yandex', 'youtube'].includes(track.source || '') ? track.id : null)
     setQuery(trackSearchQuery(track))
     navigate('search')
   }
@@ -350,6 +378,7 @@ export default function App() {
     }
     if (searchedQuery !== undefined) recordSearchChoice(track.id, searchedQuery)
     audio.current?.pause()
+    setYoutubeIntent('pause')
     setWaveActive(false)
     window.open(url, '_blank', 'noopener,noreferrer')
   }
@@ -367,6 +396,7 @@ export default function App() {
       })
     return () => {
       active = false
+      matchingRequest.current?.abort()
       downloadController.current?.abort()
       offlineUrls.current.forEach((url) => URL.revokeObjectURL(url))
     }
@@ -471,14 +501,101 @@ export default function App() {
   }
   async function playTrack(track: Track, list?: string[], fromWave = false) {
     if (!track) return
+    const request = ++playbackRequest.current
+    matchingRequest.current?.abort()
+    matchingRequest.current = null
+    setYoutubeError('')
+    setPlaybackFailure(null)
+    setWaveActive(fromWave)
+    const applyQueue = () => {
+      if (list?.length) setQueue([...new Set(list.filter((id) => canStart(byId(id))))])
+    }
     if (!isPlayable(track)) {
-      setAudioAttachId(track.id)
+      if (track.source !== 'yandex') {
+        setAudioAttachId(track.id)
+        return
+      }
+      // TXT contains names only. Resolve the clicked song, never upload the
+      // whole personal collection or substitute an unrelated recording.
+      audio.current?.pause()
+      autoplay.current = false
+      setYoutubeIntent('pause')
+      setPlaying(false)
+      setLoading(true)
+      applyQueue()
+      setCurrentId(track.id)
+      setDuration(0)
+      setProgress(0)
+      const controller = new AbortController()
+      matchingRequest.current = controller
+      try {
+        if (
+          !['http:', 'https:'].includes(location.protocol) ||
+          document.documentElement.dataset.portable === 'true'
+        )
+          throw Error(
+            'Поиск записи доступен в приложении Windows. Здесь можно добавить свой аудиофайл.',
+          )
+        const response = await fetch(
+          `/api/youtube/search?${new URLSearchParams({ q: trackSearchQuery(track) })}`,
+          {
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(22000)]),
+          },
+        )
+        const data = await response.json()
+        if (!response.ok) throw Error(data.message || 'Не удалось найти запись YouTube.')
+        controller.signal.throwIfAborted()
+        if (request !== playbackRequest.current) return
+        const match = matchYouTubeRecording(
+          track,
+          Array.isArray(data.items) ? (data.items as YouTubeVideo[]) : [],
+        )
+        if (!match) {
+          setLoading(false)
+          findAudio(track)
+          notify('Точного совпадения нет. Выбери подходящую запись и нажми значок цепочки.')
+          return
+        }
+        const linked = linkImportedTrack([track], track.id, youtubeTrack(match))[0]
+        setOnlineTracks((previous) => linkImportedTrack(previous, track.id, youtubeTrack(match)))
+        track = linked
+      } catch (error) {
+        if (request === playbackRequest.current && !controller.signal.aborted) {
+          setLoading(false)
+          findAudio(track)
+          notify(error instanceof Error ? error.message : 'Не удалось подобрать запись.')
+        }
+        return
+      } finally {
+        if (matchingRequest.current === controller) matchingRequest.current = null
+      }
+    }
+    if (request !== playbackRequest.current) return
+    setDuration(track.duration)
+    setProgress(0)
+    if (youtubeVideoId(track)) {
+      if (
+        document.documentElement.dataset.portable === 'true' ||
+        !['http:', 'https:'].includes(location.protocol)
+      ) {
+        setLoading(false)
+        notify('Плеер YouTube доступен в приложении Windows. В HTML можно добавить свой аудиофайл.')
+        return
+      }
+      audio.current?.pause()
+      autoplay.current = false
+      setAudioOverride(null)
+      applyQueue()
+      setCurrentId(track.id)
+      setNowPlaying(false)
+      setPlaying(false)
+      setLoading(true)
+      setYoutubeNeedsReload(false)
+      setYoutubeIntent('play')
+      setYoutubeSession((value) => value + 1)
       return
     }
-    setWaveActive(fromWave)
-    const request = ++playbackRequest.current
-    setPlaybackFailure(null)
-    setDuration(track.duration)
+    setYoutubeIntent('pause')
     let source = archiveResource(track.audio)
     if (track.source === 'archive' || track.localAudio) {
       try {
@@ -505,7 +622,7 @@ export default function App() {
     }
     if (request !== playbackRequest.current) return
     autoplay.current = true
-    if (list?.length) setQueue([...new Set(list.filter((id) => isPlayable(byId(id))))])
+    applyQueue()
     setAudioOverride({ id: track.id, src: source })
     if (current.id === track.id && effectiveAudio === source) {
       if (audio.current?.error) audio.current.load()
@@ -513,6 +630,26 @@ export default function App() {
     } else setCurrentId(track.id)
   }
   function togglePlayback() {
+    if (loading && matchingRequest.current) {
+      matchingRequest.current.abort()
+      matchingRequest.current = null
+      ++playbackRequest.current
+      setLoading(false)
+      setPlaying(false)
+      return
+    }
+    if (isYouTube) {
+      if (playing || (loading && youtubeIntent === 'play')) {
+        setYoutubeIntent('pause')
+        setLoading(false)
+      } else {
+        setYoutubeError('')
+        setYoutubeIntent('play')
+        if (youtubeNeedsReload) setYoutubeSession((value) => value + 1)
+        else youtubeControls.current?.play()
+      }
+      return
+    }
     if (!audio.current) return
     if (playing) audio.current.pause()
     else if (effectiveAudio && audio.current.readyState > 0 && !audio.current.error) {
@@ -526,7 +663,7 @@ export default function App() {
       seek(0)
       return
     }
-    const candidates = queue.filter((id) => tracks.some((t) => t.id === id && isPlayable(t)))
+    const candidates = queue.filter((id) => tracks.some((t) => t.id === id && canStart(t)))
     if (!candidates.length) return
     const index = candidates.indexOf(current.id)
     const next =
@@ -535,13 +672,17 @@ export default function App() {
             Math.floor(Math.random() * (candidates.length - 1))
           ]
         : candidates[(index + direction + candidates.length) % candidates.length]
-    if (next === current.id && audio.current) {
+    if (next === current.id && isYouTube) {
+      seek(0)
+      setYoutubeIntent('play')
+      youtubeControls.current?.play()
+    } else if (next === current.id && audio.current) {
       audio.current.currentTime = 0
       void audio.current.play()
     } else playTrack(byId(next), undefined, waveActive)
   }
   function playCollection(ids: string[]) {
-    const playable = ids.filter((id) => isPlayable(byId(id)))
+    const playable = ids.filter((id) => canStart(byId(id)))
     if (playable.length) playTrack(byId(playable[0]), playable)
   }
   function startWave() {
@@ -566,7 +707,8 @@ export default function App() {
     )
   }
   function seek(seconds: number) {
-    if (audio.current && Number.isFinite(audio.current.duration))
+    if (isYouTube) youtubeControls.current?.seek(seconds)
+    else if (audio.current && Number.isFinite(audio.current.duration))
       audio.current.currentTime = seconds
     setProgress(seconds)
   }
@@ -616,7 +758,7 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (!autoplay.current || !effectiveAudio || !audio.current) return
+    if (isYouTube || !autoplay.current || !effectiveAudio || !audio.current) return
     const request = playbackRequest.current
     setProgress(0)
     setLoading(true)
@@ -713,15 +855,22 @@ export default function App() {
           ? 'Локальная музыка'
           : current.source === 'archive'
             ? 'Internet Archive'
-            : 'Volna Originals'),
+            : isYouTube
+              ? 'YouTube'
+              : 'Volna Originals'),
       artwork: [{ src: '/app-icon-512.png', sizes: '512x512', type: 'image/png' }],
     })
     navigator.mediaSession.playbackState = playing ? 'playing' : 'paused'
-    navigator.mediaSession.setActionHandler(
-      'play',
-      () => void playTrack(current, undefined, waveActive),
-    )
-    navigator.mediaSession.setActionHandler('pause', () => audio.current?.pause())
+    navigator.mediaSession.setActionHandler('play', () => {
+      if (isYouTube) {
+        setYoutubeIntent('play')
+        youtubeControls.current?.play()
+      } else void playTrack(current, undefined, waveActive)
+    })
+    navigator.mediaSession.setActionHandler('pause', () => {
+      if (isYouTube) setYoutubeIntent('pause')
+      else audio.current?.pause()
+    })
     navigator.mediaSession.setActionHandler('previoustrack', () => nextTrack(-1))
     navigator.mediaSession.setActionHandler('nexttrack', () => nextTrack(1))
     navigator.mediaSession.setActionHandler('seekto', (details) => {
@@ -761,17 +910,17 @@ export default function App() {
                 if (searchedQuery !== undefined) recordSearchChoice(track.id, searchedQuery)
                 void playTrack(
                   track,
-                  items.filter(isPlayable).map((t) => t.id),
+                  items.filter(canStart).map((t) => t.id),
                   page === 'radio',
                 )
               }}
               aria-label={
-                !isPlayable(track) ? `Добавить аудио для ${track.title}` : `Слушать ${track.title}`
+                canStart(track) ? `Слушать ${track.title}` : `Добавить аудио для ${track.title}`
               }
             >
               <Artwork kind={track.artwork} image={track.artworkUrl} />
               <span>
-                {!isPlayable(track) ? (
+                {!canStart(track) ? (
                   <FileUp size={18} />
                 ) : current.id === track.id && playing ? (
                   <AudioLines size={20} />
@@ -786,7 +935,7 @@ export default function App() {
                 if (searchedQuery !== undefined) recordSearchChoice(track.id, searchedQuery)
                 void playTrack(
                   track,
-                  items.filter(isPlayable).map((t) => t.id),
+                  items.filter(canStart).map((t) => t.id),
                   page === 'radio',
                 )
               }}
@@ -797,9 +946,11 @@ export default function App() {
             <span className="track-genre">
               {track.localAudio
                 ? 'Локальный аудиофайл'
-                : isPlayable(track)
-                  ? track.genre
-                  : 'Нет аудиофайла'}
+                : youtubeVideoId(track)
+                  ? 'YouTube'
+                  : isPlayable(track)
+                    ? track.genre
+                    : 'Подобрать запись'}
             </span>
             {!isPlayable(track) && (
               <button
@@ -819,12 +970,15 @@ export default function App() {
                   aria-label={`Связать с ${track.title}`}
                   title="Связать с перенесённым треком"
                   onClick={() => {
+                    const target = byId(matchingTrackId)
+                    const linked = target && linkImportedTrack([target], target.id, track)[0]
                     setOnlineTracks((previous) =>
                       linkImportedTrack(previous, matchingTrackId, track),
                     )
                     recordSearchChoice(matchingTrackId, searchedQuery || query)
                     setMatchingTrackId(null)
                     notify('Запись YouTube связана с перенесённым треком')
+                    if (linked) void playTrack(linked)
                   }}
                 >
                   <Link2 size={18} />
@@ -912,7 +1066,7 @@ export default function App() {
                         {track.localAudio ? 'Заменить аудиофайл' : 'Добавить аудиофайл'}
                       </button>
                     )}
-                    {!isPlayable(track) && (
+                    {['youtube', 'yandex'].includes(track.source || '') && (
                       <button
                         onClick={() => {
                           findAudio(track)
@@ -928,7 +1082,7 @@ export default function App() {
                         Источник и условия
                       </a>
                     )}
-                    {isPlayable(track) && (
+                    {canStart(track) && (
                       <button
                         onClick={() => {
                           setQueue((previous) => [...previous, track.id])
@@ -1037,7 +1191,7 @@ export default function App() {
           : (selectedPlaylist?.tracks ?? []).map(byId).filter(Boolean)
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${isYouTube ? 'has-youtube-player' : ''}`}>
       <aside className="sidebar">
         <button className="brand" onClick={() => navigate('home')} aria-label="Volna — главная">
           <span className="brand-symbol">
@@ -1494,7 +1648,7 @@ export default function App() {
                   </h1>
                   <p>
                     {searchSource === 'youtube'
-                      ? 'Ищи любимые записи YouTube и открывай их в браузере.'
+                      ? 'Ищи любимую музыку и слушай её в Volna.'
                       : searchSource === 'catalog'
                         ? 'Ищи полные аудиозаписи независимых музыкантов.'
                         : 'Ищи среди добавленных треков и скачанной музыки.'}
@@ -1675,9 +1829,9 @@ export default function App() {
               </div>
               {collectionTracks.some((track) => !isPlayable(track)) && (
                 <div className="catalog-scope legacy-notice">
-                  Список содержит названия и исполнителей. Для прослушивания здесь добавь свой
-                  аудиофайл кнопкой на обложке. Лупа ищет запись на YouTube; аудио и подписка
-                  Яндекса не переносятся.
+                  Нажми воспроизведение — Volna подберёт точное совпадение на YouTube. Если
+                  подходящей записи нет, её можно выбрать вручную или добавить свой аудиофайл через
+                  меню трека. Подписка Яндекса не переносится.
                 </div>
               )}
               <div className="collection-controls">
@@ -1695,7 +1849,7 @@ export default function App() {
                 )}
                 <button
                   className="large-play"
-                  disabled={!collectionTracks.some(isPlayable)}
+                  disabled={!collectionTracks.some(canStart)}
                   aria-label="Слушать коллекцию"
                   onClick={() => playCollection(collectionTracks.map((t) => t.id))}
                 >
@@ -1881,11 +2035,87 @@ export default function App() {
           </button>
         </div>
       )}
-      <footer className="player" aria-label="Музыкальный плеер">
+      <footer
+        className={`player ${isYouTube ? 'with-youtube' : ''}`}
+        aria-label="Музыкальный плеер"
+      >
+        {isYouTube && videoId && (
+          <section className="player-youtube" aria-label="Плеер YouTube">
+            <YouTubePlayback
+              ref={youtubeControls}
+              videoId={videoId}
+              title={current.title}
+              intent={youtubeIntent}
+              session={youtubeSession}
+              volume={volume}
+              onState={(state) => {
+                setLoading(state === 3)
+                setPlaying(state === 1)
+                if (state === 1 || state === 2 || state === 0)
+                  setYoutubeIntent(state === 1 ? 'play' : 'pause')
+                if (state === 1) {
+                  setYoutubeError('')
+                  setHistory((previous) =>
+                    [current.id, ...previous.filter((id) => id !== current.id)].slice(0, 50),
+                  )
+                }
+              }}
+              onTime={(position, total) => {
+                setProgress(position)
+                setDuration(total)
+              }}
+              onEnded={() => {
+                youtubeListening()
+                if (repeat) {
+                  seek(0)
+                  setYoutubeIntent('play')
+                  youtubeControls.current?.play()
+                } else if (queue.length > 1) nextTrack()
+                else setPlaying(false)
+              }}
+              onError={(message, needsReload = true) => {
+                setYoutubeError(message)
+                setYoutubeNeedsReload(needsReload)
+                setPlaying(false)
+                setLoading(false)
+                setYoutubeIntent('pause')
+              }}
+            />
+            <div className="youtube-playback-details">
+              <span className="eyebrow">
+                <Youtube size={15} /> YOUTUBE
+              </span>
+              {youtubeError ? (
+                <p className="youtube-playback-error" role="alert">
+                  <AlertCircle size={18} /> {youtubeError}
+                </p>
+              ) : (
+                <p>
+                  Музыка играет в Volna. Пауза, очередь, избранное и плейлисты — в нижней панели.
+                </p>
+              )}
+              <div className="youtube-playback-actions">
+                <button className="text-button" onClick={() => findAudio(current)}>
+                  Другая запись <Search size={15} />
+                </button>
+                <button
+                  className="text-button"
+                  onClick={() => void playTrack(current, undefined, waveActive)}
+                >
+                  Повторить <RefreshCw size={15} />
+                </button>
+                <a href={youtubeLink(current)!} target="_blank" rel="noopener noreferrer">
+                  Открыть на YouTube <ArrowRight size={14} />
+                </a>
+              </div>
+            </div>
+          </section>
+        )}
         <div className="player-track">
           <button
             className="player-cover"
             aria-label="Открыть экран воспроизведения"
+            disabled={isYouTube}
             onClick={() => setNowPlaying(true)}
           >
             <Artwork kind={current.artwork} image={current.artworkUrl} />
@@ -1985,7 +2215,13 @@ export default function App() {
         </div>
         <div className="player-right">
           <span className="audio-quality">
-            {current.localAudio ? 'Файл' : current.source === 'archive' ? 'MP3' : 'HQ'}
+            {current.localAudio
+              ? 'Файл'
+              : isYouTube
+                ? 'YouTube'
+                : current.source === 'archive'
+                  ? 'MP3'
+                  : 'HQ'}
           </span>
           <button
             className={`icon-button ${queueOpen ? 'active' : ''}`}
@@ -2024,6 +2260,7 @@ export default function App() {
           <button
             className="icon-button fullscreen-button"
             aria-label="Полный экран плеера"
+            disabled={isYouTube}
             onClick={() => setNowPlaying(true)}
           >
             <Maximize2 size={17} />
@@ -2300,33 +2537,36 @@ export default function App() {
         src={effectiveAudio}
         preload="metadata"
         onTimeUpdate={() => {
-          if (effectiveAudio) setProgress(audio.current?.currentTime ?? 0)
+          if (!isYouTube && effectiveAudio) setProgress(audio.current?.currentTime ?? 0)
         }}
         onLoadedMetadata={() => {
-          if (effectiveAudio) setDuration(audio.current?.duration || current.duration)
+          if (!isYouTube && effectiveAudio) setDuration(audio.current?.duration || current.duration)
         }}
         onPlay={() => {
-          if (!effectiveAudio) {
+          if (isYouTube || !effectiveAudio) {
             audio.current?.pause()
             return
           }
           setPlaying(true)
+        }}
+        onPlaying={() => {
+          if (isYouTube || !effectiveAudio) return
+          setLoading(false)
+          setPlaybackFailure(null)
           setHistory((previous) =>
             [current.id, ...previous.filter((id) => id !== current.id)].slice(0, 50),
           )
         }}
-        onPlaying={() => {
-          setLoading(false)
-          setPlaybackFailure(null)
-        }}
         onWaiting={() => {
-          if (playing) setLoading(true)
+          if (!isYouTube && playing) setLoading(true)
         }}
         onPause={() => {
+          if (isYouTube) return
           setPlaying(false)
           setLoading(false)
         }}
         onEnded={() => {
+          if (isYouTube) return
           if (repeat && audio.current) {
             audio.current.currentTime = 0
             void audio.current.play()
@@ -2334,6 +2574,7 @@ export default function App() {
           else setPlaying(false)
         }}
         onError={() => {
+          if (isYouTube || !effectiveAudio) return
           void reportPlaybackFailure(undefined, current, playbackRequest.current)
         }}
       />

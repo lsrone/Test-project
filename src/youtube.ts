@@ -21,7 +21,7 @@ export function parseYouTubeId(value: string): string | null {
       return null
     return url.pathname === '/watch'
       ? valid(url.searchParams.get('v'))
-      : valid(/^\/(?:shorts|live)\/([^/]+)\/?$/.exec(url.pathname)?.[1] || null)
+      : valid(/^\/(?:shorts|live|embed)\/([^/]+)\/?$/.exec(url.pathname)?.[1] || null)
   } catch {
     return null
   }
@@ -35,6 +35,60 @@ export function youtubeLink(track: Track): string | null {
       ? parseYouTubeId(track.id.replace(/^youtube:/, '')) || parseYouTubeId(track.sourceUrl || '')
       : null)
   return id ? youtubeUrl(id) : null
+}
+export function youtubeVideoId(track?: Track): string | null {
+  if (!track || track.localAudio) return null
+  const link = youtubeLink(track)
+  return link ? parseYouTubeId(link) : null
+}
+
+export function youtubePlaybackError(code: number): string {
+  if (code === 101 || code === 150)
+    return 'Автор запретил встраивание этой записи. Выбери другую запись кнопкой «Другая запись».'
+  if (code === 100) return 'Эта запись удалена или закрыта. Можно подобрать другую запись.'
+  if (code === 153)
+    return 'YouTube не подтвердил источник плеера. Повтори запуск в приложении Volna.'
+  if (code === 2) return 'Некорректная ссылка YouTube. Выбери другую запись.'
+  return 'YouTube не смог запустить запись. Проверь подключение или выбери другую запись.'
+}
+
+// Resolve only a close artist/title match. A remix or a different performer
+// must never silently replace an imported song.
+export function matchYouTubeRecording(
+  track: Pick<Track, 'artist' | 'title'>,
+  videos: YouTubeVideo[],
+) {
+  const normalize = (text: string) =>
+    text
+      .normalize('NFKC')
+      .toLocaleLowerCase()
+      .replace(/ё/g, 'е')
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim()
+  const artist = normalize(track.artist.replace(/\s*[-–—]\s*(?:Topic|тема)$/i, ''))
+  const title = normalize(track.title)
+  if (!artist || !title) return null
+  const versions =
+    /\b(remix|cover|live|slowed|sped|nightcore|instrumental|karaoke|rework)\b|ремикс|кавер|концерт|минус/iu
+  const candidates = videos.filter((video) => {
+    if (!parseYouTubeId(video.id)) return false
+    if (!versions.test(track.title) && versions.test(video.title)) return false
+    let name = video.title
+      .replace(
+        /\((?:official\s*)?(?:audio|music\s*video|video|lyric(?:s|\s*video)?)(?:\s*\d{4})?\)/gi,
+        '',
+      )
+      .replace(/\[(?:official\s*)?(?:audio|music\s*video|video|lyrics?)\]/gi, '')
+    const prefix = new RegExp(
+      '^' + track.artist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*[-–—:]\\s*',
+      'i',
+    )
+    const hasPrefix = prefix.test(name)
+    if (hasPrefix) name = name.replace(prefix, '')
+    const channel = normalize(video.channel.replace(/\s*[-–—]\s*(?:Topic|тема)$/i, ''))
+    return normalize(name) === title && (channel === artist || hasPrefix)
+  })
+  return candidates[0] || null
 }
 export function trackSearchQuery(track: Pick<Track, 'title' | 'artist'>): string {
   const artist = track.artist.replace(/\s*[-–—]\s*(?:Topic|тема)$/i, '').trim()

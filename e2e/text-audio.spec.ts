@@ -1,6 +1,10 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import { mockYouTube } from './youtube-fixture'
+async function attach(page: Page, title: string) {
+  await page.getByRole('button', { name: `Действия с ${title}`, exact: true }).click()
+  await page.getByRole('button', { name: 'Добавить аудиофайл', exact: true }).click()
+}
 test.use({ serviceWorkers: 'block' })
 test('imports a plain TXT, previews reversed columns and preserves the collection on reimport', async ({
   page,
@@ -41,7 +45,7 @@ test('a local audio attachment plays inside the app, survives metadata refresh, 
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('ambient')
   await expect(page.locator('.youtube-search .track-row')).toHaveCount(2)
   await page.getByRole('button', { name: 'Добавить ØDEN — Blink в избранное', exact: true }).click()
-  await page.getByRole('button', { name: 'Добавить аудио для ØDEN — Blink', exact: true }).click()
+  await attach(page, 'ØDEN — Blink')
   await page.getByLabel('Аудиофайл для трека').setInputFiles({
     name: 'owned.mp3',
     mimeType: 'audio/mpeg',
@@ -87,7 +91,7 @@ test('a local audio attachment plays inside the app, survives metadata refresh, 
     .click()
   await expect(page.locator('.track-info strong')).toHaveText('ØDEN — Blink')
   await expect(
-    page.getByRole('button', { name: 'Добавить аудио для ØDEN — Blink', exact: true }),
+    page.getByRole('button', { name: 'Слушать ØDEN — Blink', exact: true }),
   ).toBeVisible()
   expect(
     await page.evaluate(() => JSON.parse(localStorage.getItem('volna.liked') || '[]')),
@@ -99,7 +103,7 @@ test('rejecting a bad local file leaves existing audio and collection membership
   await mockYouTube(page, { total: 2 })
   await page.goto('/')
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('ambient')
-  await page.getByRole('button', { name: 'Добавить аудио для ØDEN — Blink', exact: true }).click()
+  await attach(page, 'ØDEN — Blink')
   await page.getByLabel('Аудиофайл для трека').setInputFiles({
     name: 'not-music.mp3',
     mimeType: 'audio/mpeg',

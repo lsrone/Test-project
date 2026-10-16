@@ -32,6 +32,10 @@ describe('Windows app local server', () => {
     const page = await fetch(origin)
     expect(await page.text()).toContain('Volna desktop')
     expect(page.headers.get('content-security-policy')).toContain("script-src 'self'")
+    expect(page.headers.get('content-security-policy')).toContain(
+      'frame-src https://www.youtube-nocookie.com https://www.youtube.com;',
+    )
+    expect(page.headers.get('content-security-policy')).toContain("object-src 'none'")
     expect(await (await fetch(`${origin}/api/archive/search`)).json()).toEqual({
       configured: true,
       mode: 'public',

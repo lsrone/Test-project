@@ -5,6 +5,8 @@ import {
   trackSearchQuery,
   linkImportedTrack,
   youtubeLink,
+  youtubeVideoId,
+  matchYouTubeRecording,
 } from './youtube'
 import { isPlayable } from './audioSource'
 import { parseLibraryFile, prepareLibraryImport } from './libraryImport'
@@ -12,6 +14,7 @@ describe('YouTube metadata and Yandex linking', () => {
   it('accepts actual YouTube addresses and rejects lookalike hosts and credentials', () => {
     expect(parseYouTubeId('https://music.youtube.com/watch?v=jfKfPfyJRdk')).toBe('jfKfPfyJRdk')
     expect(parseYouTubeId('https://youtu.be/jfKfPfyJRdk')).toBe('jfKfPfyJRdk')
+    expect(parseYouTubeId('https://www.youtube.com/embed/jfKfPfyJRdk')).toBe('jfKfPfyJRdk')
     for (const url of [
       'https://youtube.com.evil.example/watch?v=jfKfPfyJRdk',
       'https://user:pass@youtube.com/watch?v=jfKfPfyJRdk',
@@ -40,7 +43,7 @@ describe('YouTube metadata and Yandex linking', () => {
       title: 'ØDEN — Blink',
       channel: 'ØDEN - Topic',
     })
-    expect(isPlayable(record)).toBe(false)
+    expect(isPlayable(record)).toBe(true)
     const linked = linkImportedTrack(original.onlineTracks, 'yandex:123', record)
     expect(linked[0]).toMatchObject({
       id: 'yandex:123',
@@ -58,5 +61,34 @@ describe('YouTube metadata and Yandex linking', () => {
     expect(youtubeLink(reimport.onlineTracks[0])).toBe(
       'https://www.youtube.com/watch?v=jfKfPfyJRdk',
     )
+    expect(isPlayable(reimport.onlineTracks[0])).toBe(true)
+  })
+  it('resolves only the requested artist and version; refuses covers, remixes and ambiguous titles', () => {
+    const song = { artist: 'Northern Lights', title: 'Signal' }
+    const remix = {
+      id: 'remix000001',
+      title: 'Northern Lights - Signal (Remix)',
+      channel: 'Northern Lights',
+    }
+    const wrong = { id: 'wrong000001', title: 'Signal', channel: 'Someone Else' }
+    const correct = {
+      id: 'exact000001',
+      title: 'Northern Lights — Signal (Official Audio)',
+      channel: 'Northern Lights - Topic',
+    }
+    expect(matchYouTubeRecording(song, [remix, wrong, correct])).toEqual(correct)
+    expect(matchYouTubeRecording(song, [remix, wrong])).toBeNull()
+    expect(
+      matchYouTubeRecording({ artist: 'A+B', title: 'Song' }, [
+        { id: 'exact000001', title: 'A+B - Song', channel: 'A+B' },
+      ]),
+    ).not.toBeNull()
+    const local = {
+      ...youtubeTrack(correct),
+      localAudio: { name: 'own.mp3', originalDuration: 0 },
+      audio: 'local:one',
+    }
+    expect(youtubeVideoId(local)).toBeNull()
+    expect(isPlayable(local)).toBe(true)
   })
 })
