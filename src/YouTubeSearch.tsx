@@ -89,8 +89,8 @@ export function YouTubeSearch({
         {loading && <LoaderCircle size={20} className="spinner" />}
       </div>
       <p className="catalog-scope">
-        Записи открываются на YouTube в браузере. Встроенный аудиоплеер использует вкладку
-        «Аудиокаталог».
+        Для прослушивания здесь добавь свой аудиофайл кнопкой на обложке. YouTube не выдаёт
+        отдельное аудио для встроенного плеера без видео.
       </p>
       {query.trim().length >= 2 && (
         <a

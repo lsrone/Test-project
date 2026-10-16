@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { mockYouTube } from './youtube-fixture'
 test.use({ serviceWorkers: 'block' })
-test('YouTube is the default, paginates 120 records, saves newest first and opens externally without replacing the audio player', async ({
+test('YouTube is the default, paginates 120 records, saves newest first and never redirects automatically', async ({
   page,
   context,
 }) => {
@@ -28,13 +28,11 @@ test('YouTube is the default, paginates 120 records, saves newest first and open
   await page
     .getByRole('button', { name: 'Добавить YouTube song 119 в избранное', exact: true })
     .click()
-  const popupPromise = context.waitForEvent('page')
-  await page.getByRole('button', { name: 'Открыть ØDEN — Blink на YouTube', exact: true }).click()
-  const popup = await popupPromise
-  await popup.waitForLoadState()
-  expect(popup.url()).toBe('https://www.youtube.com/watch?v=vid00000000')
-  await popup.close()
-  await expect(page.locator('audio')).toHaveJSProperty('paused', true)
+  await page.getByRole('button', { name: 'Добавить аудио для ØDEN — Blink', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Прослушивание в Volna' })).toBeVisible()
+  expect(context.pages()).toHaveLength(1)
+  await page.getByRole('button', { name: 'Закрыть выбор аудио' }).click()
+  await expect(page.locator('audio')).toHaveJSProperty('paused', false)
   await expect(page.locator('.player-track-info strong')).toHaveText('Blue Hour')
   await expect(page.locator('iframe,video')).toHaveCount(0)
   expect(requests.some((url) => /googlevideo|\/api\/youtube\/(audio|resolve)/.test(url))).toBe(
@@ -97,12 +95,10 @@ test('Yandex recording is explicitly linked to a chosen YouTube result without l
     sourceUrl: 'https://music.yandex.ru/track/123',
   })
   expect(stored.playlists.find((p) => p.title === 'Моя музыка').tracks).toEqual(['yandex:123'])
-  const popupPromise = context.waitForEvent('page')
-  await page.getByRole('button', { name: 'Открыть Blink на YouTube', exact: true }).click()
-  const popup = await popupPromise
-  await popup.waitForLoadState()
-  expect(popup.url()).toContain('v=vid00000000')
-  await popup.close()
+  await page.getByRole('button', { name: 'Добавить аудио для Blink', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Прослушивание в Volna' })).toBeVisible()
+  expect(context.pages()).toHaveLength(1)
+  await page.getByRole('button', { name: 'Закрыть выбор аудио' }).click()
   await expect(page.locator('iframe,video')).toHaveCount(0)
 })
 test('a failed source has a browser search fallback, and retry and pasted links remain usable', async ({
@@ -123,7 +119,7 @@ test('a failed source has a browser search fallback, and retry and pasted links 
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('https://youtu.be/jfKfPfyJRdk')
   await expect(page.locator('.youtube-search .track-row')).toHaveCount(1)
   await expect(
-    page.getByRole('button', { name: 'Открыть Запись YouTube на YouTube', exact: true }),
+    page.getByRole('button', { name: 'Добавить аудио для Запись YouTube', exact: true }),
   ).toBeVisible()
   await expect(page.locator('iframe,video')).toHaveCount(0)
 })

@@ -4297,3 +4297,29 @@ h2 {
 .search-source-tabs {
   flex-wrap: wrap;
 }
+.import-title select {
+  color: #e0eaff;
+  background: #1e2b42;
+  border: 1px solid #3e5377;
+  padding: 13px 15px;
+  border-radius: 7px;
+  max-width: 500px;
+  font: inherit;
+}
+.local-audio-track {
+  color: #c7d8ff;
+  margin: 16px 0;
+  overflow-wrap: anywhere;
+}
+.local-audio-note {
+  color: #a2b3cf;
+  line-height: 1.8;
+  font-size: 13px;
+  margin-bottom: 24px;
+}
+.local-audio-dialog .about-fine-print {
+  margin: 18px 0 24px;
+}
+.local-audio-dialog > .text-button {
+  margin-top: 16px;
+}

@@ -3,7 +3,6 @@ import {
   ArrowDownToLine,
   ArrowRight,
   AlertCircle,
-  ExternalLink,
   Link2,
   Youtube,
   AudioLines,
@@ -57,6 +56,7 @@ import { useListening } from './useListening'
 import { useStoredState } from './storage'
 import { AudioSearch } from './AudioSearch'
 import { YouTubeSearch } from './YouTubeSearch'
+import { LocalAudioDialog } from './LocalAudioDialog'
 import { youtubeLink, trackSearchQuery, linkImportedTrack } from './youtube'
 import { archiveResource, isPlayable } from './audioSource'
 import { describePlaybackFailure, type PlaybackFailure } from './playbackFailure'
@@ -75,6 +75,7 @@ import {
   listSavedTracks,
   removeSavedTrack,
   savedAudio,
+  saveLocalAudio,
   type SavedTrack,
 } from './offline'
 
@@ -144,6 +145,7 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [searchSource, setSearchSource] = useState<'youtube' | 'catalog' | 'library'>('youtube')
   const [matchingTrackId, setMatchingTrackId] = useState<string | null>(null)
+  const [audioAttachId, setAudioAttachId] = useState<string | null>(null)
   const [tab, setTab] = useState('Все')
   const [mood, setMood] = useState<Mood>('all')
   const [liked, setLiked] = useStoredState<string[]>('volna.liked', [])
@@ -221,8 +223,9 @@ export default function App() {
   const effectiveAudio =
     audioOverride?.id === current.id
       ? audioOverride.src
-      : current.source === 'archive' &&
-          (saved === null || saved.some((item) => item.id === current.id))
+      : current.localAudio ||
+          (current.source === 'archive' &&
+            (saved === null || saved.some((item) => item.id === current.id)))
         ? undefined
         : archiveResource(current.audio)
   const recommended = useMemo(
@@ -399,6 +402,25 @@ export default function App() {
   async function deleteDownload(track: Track) {
     try {
       await removeSavedTrack(track.id)
+      if (track.localAudio) {
+        if (current.id === track.id) {
+          audio.current?.pause()
+          autoplay.current = false
+          setAudioOverride(null)
+        }
+        setOnlineTracks((previous) =>
+          previous.map((item) =>
+            item.id === track.id
+              ? {
+                  ...item,
+                  audio: '',
+                  duration: track.localAudio!.originalDuration,
+                  localAudio: undefined,
+                }
+              : item,
+          ),
+        )
+      }
       setSaved((previous) => (previous || []).filter((item) => item.id !== track.id))
       const url = offlineUrls.current.get(track.id)
       if (url && current.id !== track.id) URL.revokeObjectURL(url)
@@ -407,6 +429,21 @@ export default function App() {
     } catch {
       notify('Не удалось удалить копию. Попробуй ещё раз.')
     }
+  }
+
+  async function attachAudio(track: Track, file: File) {
+    const entry = await saveLocalAudio(track, file)
+    const previous = offlineUrls.current.get(track.id)
+    if (previous) {
+      audio.current?.pause()
+      URL.revokeObjectURL(previous)
+      offlineUrls.current.delete(track.id)
+    }
+    setSaved((items) => [...(items || []).filter((item) => item.id !== track.id), entry])
+    importTracks([entry.track])
+    setQueue((items) => (items.includes(track.id) ? items : [track.id, ...items]))
+    await playTrack(entry.track)
+    notify('Аудиофайл сохранён на устройстве и доступен без интернета.')
   }
 
   function navigate(next: Page, playlistId?: string) {
@@ -435,7 +472,7 @@ export default function App() {
   async function playTrack(track: Track, list?: string[], fromWave = false) {
     if (!track) return
     if (!isPlayable(track)) {
-      openYouTube(track)
+      setAudioAttachId(track.id)
       return
     }
     setWaveActive(fromWave)
@@ -443,7 +480,7 @@ export default function App() {
     setPlaybackFailure(null)
     setDuration(track.duration)
     let source = archiveResource(track.audio)
-    if (track.source === 'archive') {
+    if (track.source === 'archive' || track.localAudio) {
       try {
         let local = offlineUrls.current.get(track.id)
         if (!local) {
@@ -454,7 +491,15 @@ export default function App() {
           }
         }
         if (local) source = local
+        else if (track.localAudio) throw Error('Файл не найден на устройстве.')
       } catch {
+        if (track.localAudio) {
+          if (request === playbackRequest.current) {
+            notify('Аудиофайл недоступен. Выбери его заново.')
+            setAudioAttachId(track.id)
+          }
+          return
+        }
         /* Online playback remains available when local storage is blocked. */
       }
     }
@@ -602,7 +647,7 @@ export default function App() {
         return
       }
       if (target.matches('input, textarea, button, select') || target.isContentEditable) return
-      if (event.code === 'Space' && !dialog) {
+      if (event.code === 'Space' && !dialog && !audioAttachId) {
         event.preventDefault()
         togglePlayback()
       }
@@ -663,7 +708,12 @@ export default function App() {
       title: current.title,
       artist: current.artist,
       album:
-        current.album || (current.source === 'archive' ? 'Internet Archive' : 'Volna Originals'),
+        current.album ||
+        (current.localAudio
+          ? 'Локальная музыка'
+          : current.source === 'archive'
+            ? 'Internet Archive'
+            : 'Volna Originals'),
       artwork: [{ src: '/app-icon-512.png', sizes: '512x512', type: 'image/png' }],
     })
     navigator.mediaSession.playbackState = playing ? 'playing' : 'paused'
@@ -684,6 +734,7 @@ export default function App() {
   }, [current.id, playing, shuffle, repeat, queue, waveActive])
 
   function renderTrackRows(items: Track[], showNumber = true, searchedQuery?: string) {
+    items = items.map((track) => byId(track.id) || track)
     return (
       <div className="track-list">
         {items.map((track, index) => (
@@ -715,21 +766,13 @@ export default function App() {
                 )
               }}
               aria-label={
-                !isPlayable(track)
-                  ? youtubeLink(track)
-                    ? `Открыть ${track.title} на YouTube`
-                    : `Найти ${track.title} на YouTube`
-                  : `Слушать ${track.title}`
+                !isPlayable(track) ? `Добавить аудио для ${track.title}` : `Слушать ${track.title}`
               }
             >
               <Artwork kind={track.artwork} image={track.artworkUrl} />
               <span>
                 {!isPlayable(track) ? (
-                  youtubeLink(track) ? (
-                    <ExternalLink size={18} />
-                  ) : (
-                    <Search size={18} />
-                  )
+                  <FileUp size={18} />
                 ) : current.id === track.id && playing ? (
                   <AudioLines size={20} />
                 ) : (
@@ -752,12 +795,21 @@ export default function App() {
               <span>{track.artist}</span>
             </button>
             <span className="track-genre">
-              {isPlayable(track)
-                ? track.genre
-                : youtubeLink(track)
-                  ? 'YouTube · в браузере'
-                  : 'Найти на YouTube'}
+              {track.localAudio
+                ? 'Локальный аудиофайл'
+                : isPlayable(track)
+                  ? track.genre
+                  : 'Нет аудиофайла'}
             </span>
+            {!isPlayable(track) && (
+              <button
+                className="icon-button"
+                aria-label={`Найти ${track.title} на YouTube`}
+                onClick={() => findAudio(track)}
+              >
+                <Search size={17} />
+              </button>
+            )}
             {matchingTrackId &&
               track.source === 'youtube' &&
               page === 'search' &&
@@ -789,6 +841,16 @@ export default function App() {
             >
               <Heart size={17} fill={liked.includes(track.id) ? 'currentColor' : 'none'} />
             </button>
+            {track.localAudio && (
+              <button
+                className="icon-button download-button downloaded"
+                aria-label={`Удалить аудиофайл ${track.title}`}
+                title="Удалить файл с устройства"
+                onClick={() => void deleteDownload(track)}
+              >
+                <Check size={18} />
+              </button>
+            )}
             {track.source === 'archive' &&
               (download?.id === track.id ? (
                 <button
@@ -839,6 +901,17 @@ export default function App() {
                     onClick={() => setMenuTrack(null)}
                   />
                   <div className="context-menu">
+                    {['youtube', 'yandex'].includes(track.source || '') && (
+                      <button
+                        onClick={() => {
+                          setAudioAttachId(track.id)
+                          setMenuTrack(null)
+                        }}
+                      >
+                        <FileUp size={16} />
+                        {track.localAudio ? 'Заменить аудиофайл' : 'Добавить аудиофайл'}
+                      </button>
+                    )}
                     {!isPlayable(track) && (
                       <button
                         onClick={() => {
@@ -1602,9 +1675,9 @@ export default function App() {
               </div>
               {collectionTracks.some((track) => !isPlayable(track)) && (
                 <div className="catalog-scope legacy-notice">
-                  YouTube-записи открываются в браузере. Для импорта Яндекса нажми лупу, найди
-                  нужную запись и свяжи её с треком. Избранное и плейлисты сохранятся; аудиофайлы и
-                  подписка Яндекса не переносятся.
+                  Список содержит названия и исполнителей. Для прослушивания здесь добавь свой
+                  аудиофайл кнопкой на обложке. Лупа ищет запись на YouTube; аудио и подписка
+                  Яндекса не переносятся.
                 </div>
               )}
               <div className="collection-controls">
@@ -1911,7 +1984,9 @@ export default function App() {
           </div>
         </div>
         <div className="player-right">
-          <span className="audio-quality">{current.source === 'archive' ? 'MP3' : 'HQ'}</span>
+          <span className="audio-quality">
+            {current.localAudio ? 'Файл' : current.source === 'archive' ? 'MP3' : 'HQ'}
+          </span>
           <button
             className={`icon-button ${queueOpen ? 'active' : ''}`}
             aria-label="Очередь воспроизведения"
@@ -2052,6 +2127,18 @@ export default function App() {
         </div>
       )}
 
+      {audioAttachId && byId(audioAttachId) && (
+        <LocalAudioDialog
+          key={audioAttachId}
+          track={byId(audioAttachId)}
+          onSave={(file) => attachAudio(byId(audioAttachId), file)}
+          onClose={() => setAudioAttachId(null)}
+          onExternal={() => {
+            openYouTube(byId(audioAttachId))
+            setAudioAttachId(null)
+          }}
+        />
+      )}
       {dialog && (
         <div
           className="modal-backdrop"

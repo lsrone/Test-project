@@ -10,7 +10,13 @@ import {
   Music2,
   X,
 } from 'lucide-react'
-import { parseLibraryFile, type ImportOptions, type LibraryFile } from './libraryImport'
+import {
+  decodeLibraryText,
+  parseLibraryFile,
+  type TextImportOrder,
+  type ImportOptions,
+  type LibraryFile,
+} from './libraryImport'
 
 export function LibraryImport({
   onImport,
@@ -32,6 +38,8 @@ export function LibraryImport({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState<ReturnType<typeof onImport> | null>(null)
+  const [textOrder, setTextOrder] = useState<TextImportOrder>('artist-title')
+  const rawText = useRef('')
 
   async function read(selected: File) {
     const version = ++readVersion.current
@@ -39,8 +47,8 @@ export function LibraryImport({
     setError('')
     setFile(null)
     setDone(null)
-    if (!/\.(csv|json)$/i.test(selected.name)) {
-      setError('Выбери файл CSV или JSON.')
+    if (!/\.(csv|json|txt|tsv)$/i.test(selected.name)) {
+      setError('Выбери TXT, CSV, TSV или JSON. Документ Word сначала сохрани как обычный TXT.')
       return
     }
     if (selected.size > 10 * 1024 * 1024) {
@@ -49,13 +57,14 @@ export function LibraryImport({
     }
     setBusy(true)
     try {
-      const text = await selected.text()
+      const text = decodeLibraryText(await selected.arrayBuffer())
       if (version !== readVersion.current) return
-      const data = parseLibraryFile(text, selected.name)
+      rawText.current = text
+      const data = parseLibraryFile(text, selected.name, textOrder)
       setFile(data)
       setTitle(data.title)
       setFilename(selected.name)
-      setAllLiked(/liked|favorite|favourite|любим|избран/i.test(selected.name))
+      setAllLiked(/liked|favorite|favourite|любим|избран|нрав/i.test(selected.name))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Не удалось прочитать файл.')
     } finally {
@@ -73,9 +82,9 @@ export function LibraryImport({
           <h1>
             Забери любимое с собой<span className="heading-dot">.</span>
           </h1>
-          <p>Перенеси библиотеку Яндекс Музыки из CSV или JSON.</p>
+          <p>Перенеси библиотеку или свой список исполнителей и треков.</p>
         </div>
-        <span className="import-format">CSV / JSON</span>
+        <span className="import-format">TXT / CSV / JSON</span>
       </div>
       {done ? (
         <section className="import-success" role="status">
@@ -123,7 +132,7 @@ export function LibraryImport({
             <input
               ref={input}
               type="file"
-              accept=".csv,.json,application/json,text/csv"
+              accept=".txt,.tsv,.csv,.json,application/json,text/csv,text/plain,text/tab-separated-values"
               aria-label="Файл экспорта Яндекс Музыки"
               onChange={(event) => {
                 const selected = event.target.files?.[0]
@@ -137,7 +146,7 @@ export function LibraryImport({
               onClick={() => input.current?.click()}
             >
               {busy ? <LoaderCircle className="spinner" size={17} /> : <FileUp size={17} />}{' '}
-              {busy ? 'Читаем файл…' : 'Выбрать CSV или JSON'}
+              {busy ? 'Читаем файл…' : 'Выбрать TXT, CSV или JSON'}
             </button>
             <small>Можно перетащить файл сюда. Он обрабатывается на устройстве.</small>
           </section>
@@ -181,6 +190,30 @@ export function LibraryImport({
                   Объединено повторов: {file.duplicates}. Пропущено записей без метаданных:{' '}
                   {file.skipped}.
                 </p>
+              )}
+              {file.textLayout && (
+                <label className="import-title">
+                  Порядок полей в текстовом списке
+                  <select
+                    aria-label="Порядок полей в TXT"
+                    value={textOrder}
+                    onChange={(event) => {
+                      const order = event.target.value as TextImportOrder
+                      setTextOrder(order)
+                      try {
+                        setFile(parseLibraryFile(rawText.current, filename, order))
+                        setError('')
+                      } catch (cause) {
+                        setError(
+                          cause instanceof Error ? cause.message : 'Не удалось прочитать список.',
+                        )
+                      }
+                    }}
+                  >
+                    <option value="artist-title">Исполнитель — Название</option>
+                    <option value="title-artist">Название — Исполнитель</option>
+                  </select>
+                </label>
               )}
               <label className="import-title">
                 Название коллекции
@@ -249,13 +282,19 @@ export function LibraryImport({
               <strong>Твоя коллекция — в Volna</strong>
               <p>
                 Переносятся списки и избранное. Нажми значок поиска рядом с треком, чтобы найти
-                запись в аудиокаталоге. Совпадения могут отсутствовать. Аудиофайлы и подписка Яндекс
-                Музыки не переносятся; для прослушивания нужен интернет.
+                запись на YouTube и связать выбранный результат. Аудиофайлы и подписка Яндекс Музыки
+                не переносятся; для прослушивания нужен интернет.
               </p>
             </div>
           </div>
           <details className="import-help">
             <summary>Какие файлы подходят</summary>
+            <p>
+              TXT: один трек на строку в формате «Исполнитель — Название». Например: КИНО — Звезда
+              по имени Солнце. Поддерживаются обычный дефис с пробелами, тире, точка с запятой и
+              табуляция. Если название указано первым, поменяй порядок полей в предпросмотре.
+              Поддерживаются UTF-8, UTF-16 и Windows-1251.
+            </p>
             <p>
               CSV с колонками «Название», «Исполнитель», «Альбом», «Плейлист», «Избранное» или
               title, artist, album, playlist, liked. Поддерживаются запятая, точка с запятой,

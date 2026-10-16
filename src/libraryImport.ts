@@ -14,7 +14,9 @@ export interface LibraryFile {
   songs: ImportedSong[]
   duplicates: number
   skipped: number
+  textLayout?: boolean
 }
+export type TextImportOrder = 'artist-title' | 'title-artist'
 export interface ImportOptions {
   title: string
   allLiked: boolean
@@ -96,7 +98,39 @@ function csvRows(input: string): string[][] {
   return rows
 }
 
-export function parseLibraryFile(input: string, filename: string): LibraryFile {
+export function decodeLibraryText(input: ArrayBuffer): string {
+  const bytes = new Uint8Array(input)
+  let encoding = 'utf-8'
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) encoding = 'utf-16le'
+  else if (bytes[0] === 0xfe && bytes[1] === 0xff) encoding = 'utf-16be'
+  else {
+    let even = 0,
+      odd = 0
+    for (let i = 0; i < Math.min(bytes.length, 256); i++)
+      if (bytes[i] === 0) {
+        if (i % 2) odd++
+        else even++
+      }
+    if (odd > 8 && odd > even * 3) encoding = 'utf-16le'
+    else if (even > 8 && even > odd * 3) encoding = 'utf-16be'
+  }
+  let text: string
+  try {
+    text = new TextDecoder(encoding, { fatal: true }).decode(bytes)
+  } catch {
+    if (encoding !== 'utf-8') throw Error('Не удалось прочитать текст. Сохрани файл в UTF-8.')
+    text = new TextDecoder('windows-1251').decode(bytes)
+  }
+  if (text.includes('\0'))
+    throw Error('Файл не похож на текстовый список. Сохрани документ как TXT в UTF-8.')
+  return text
+}
+
+export function parseLibraryFile(
+  input: string,
+  filename: string,
+  textOrder: TextImportOrder = 'artist-title',
+): LibraryFile {
   if (input.length > 10 * 1024 * 1024) throw new Error('Файл слишком большой. Максимум — 10 МБ.')
   const source = input.replace(/^\ufeff/, '').trim()
   if (!source) throw new Error('Файл пуст. Выбери экспорт с названиями и исполнителями.')
@@ -106,7 +140,8 @@ export function parseLibraryFile(input: string, filename: string): LibraryFile {
   let skipped = 0,
     duplicates = 0,
     rows = 0
-  let title = clean(filename.replace(/\.(csv|json)$/i, '')) || 'Из Яндекс Музыки'
+  let title = clean(filename.replace(/\.(csv|json|txt|tsv)$/i, '')) || 'Из Яндекс Музыки'
+  let textLayout = false
 
   function add(raw: Record<string, unknown>, playlist = '', inheritedLike = false) {
     if (++rows > 10000) throw new Error('В одном файле поддерживается до 10 000 треков.')
@@ -247,6 +282,70 @@ export function parseLibraryFile(input: string, filename: string): LibraryFile {
     visit(root)
     if (root && !Array.isArray(root) && typeof root === 'object')
       title = clean((root as Record<string, unknown>).title) || title
+  } else if (/\.(txt|tsv)$/i.test(filename)) {
+    const lines = source
+      .split(/\r\n|\n|\r/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+    let header: string[] = []
+    try {
+      header = csvRows(lines[0] || '')[0] || []
+    } catch {
+      /* A plain title can contain quotes. */
+    }
+    const names = header.map(field)
+    const hasHeader =
+      names.some((name) =>
+        ['artist', 'artists', 'artistname', 'исполнитель', 'исполнители'].includes(name),
+      ) &&
+      names.some((name) =>
+        ['title', 'track', 'trackname', 'название', 'названиетрека', 'трек'].includes(name),
+      )
+    if (hasHeader) {
+      const [columns, ...records] = csvRows(source)
+      for (const record of records)
+        add(Object.fromEntries(columns.map((name, index) => [name, record[index] || ''])))
+    } else {
+      textLayout = true
+      let labelled: Record<string, string> = {}
+      for (const inputLine of lines) {
+        const line = inputLine.replace(/^(?:\d{1,5}[.)]\s+|[•*]\s+)/, '')
+        const label =
+          /^(исполнитель|артист|artist|название(?: трека)?|трек|track|title)\s*:\s*(.+)$/i.exec(
+            line,
+          )
+        if (label) {
+          const key = /^(исполнитель|артист|artist)$/i.test(label[1]) ? 'artist' : 'title'
+          if (labelled[key]) {
+            add(labelled)
+            labelled = {}
+          }
+          labelled[key] = label[2]
+          if (labelled.artist && labelled.title) {
+            add(labelled)
+            labelled = {}
+          }
+          continue
+        }
+        if (Object.keys(labelled).length) {
+          add(labelled)
+          labelled = {}
+        }
+        const separator = /\s*[—–]\s*|\s+-\s+|\t+|\s*;\s*|\s+\|\s+/.exec(line)
+        if (!separator || separator.index === undefined) {
+          add({})
+          continue
+        }
+        const first = line.slice(0, separator.index).trim(),
+          second = line.slice(separator.index + separator[0].length).trim()
+        add(
+          textOrder === 'artist-title'
+            ? { artist: first, title: second }
+            : { title: first, artist: second },
+        )
+      }
+      if (Object.keys(labelled).length) add(labelled)
+    }
   } else {
     const [header, ...records] = csvRows(source)
     if (!header || !records.length) throw new Error('В CSV нужны заголовки и хотя бы один трек.')
@@ -255,9 +354,11 @@ export function parseLibraryFile(input: string, filename: string): LibraryFile {
   }
   if (!songs.length)
     throw new Error(
-      'Не нашёл треки с названиями и исполнителями. Файл только с ID треков не подходит: нужны полные метаданные.',
+      /\.(txt|tsv)$/i.test(filename)
+        ? 'Не нашёл пары «Исполнитель — Название». Помести каждый трек на отдельную строку, например: КИНО — Звезда по имени Солнце. Можно использовать точку с запятой или табуляцию.'
+        : 'Не нашёл треки с названиями и исполнителями. Файл только с ID треков не подходит: нужны полные метаданные.',
     )
-  return { title, songs, skipped, duplicates }
+  return { title, songs, skipped, duplicates, ...(textLayout ? { textLayout: true } : {}) }
 }
 
 export function prepareLibraryImport(

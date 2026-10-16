@@ -19,6 +19,7 @@ export interface Track {
   album?: string
   license?: string
   downloadAllowed?: boolean
+  localAudio?: { name: string; originalDuration: number }
 }
 export interface Playlist {
   id: string

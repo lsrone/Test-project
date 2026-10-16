@@ -81,6 +81,61 @@ export async function removeSavedTrack(id: string): Promise<void> {
   await complete(transaction)
 }
 
+export async function saveLocalAudio(track: Track, file: File): Promise<SavedTrack> {
+  if (!['youtube', 'yandex'].includes(track.source || ''))
+    throw new Error('Выбери трек из перенесённой коллекции или поиска YouTube.')
+  if (!/\.(mp3|m4a|ogg|wav|flac)$/i.test(file.name) || !file.size)
+    throw new Error('Выбери непустой аудиофайл MP3, M4A, OGG, WAV или FLAC.')
+  if (file.size > 250 * 1024 * 1024) throw new Error('Для одного трека поддерживается до 250 МБ.')
+  const db = await openDatabase()
+  const estimate = await navigator.storage?.estimate?.()
+  if (estimate?.quota && file.size > estimate.quota - (estimate.usage || 0))
+    throw new Error('На устройстве не хватает места для этого файла.')
+  const url = URL.createObjectURL(file)
+  const probe = document.createElement('audio')
+  let duration: number
+  try {
+    duration = await new Promise<number>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(Error('Не удалось прочитать аудиофайл. Попробуй MP3.')),
+        12000,
+      )
+      probe.onloadedmetadata = () => {
+        clearTimeout(timer)
+        if (Number.isFinite(probe.duration) && probe.duration > 0) resolve(probe.duration)
+        else reject(Error('Не удалось определить длительность аудиофайла.'))
+      }
+      probe.onerror = () => {
+        clearTimeout(timer)
+        reject(Error('Файл повреждён или его формат не поддерживается. Попробуй MP3.'))
+      }
+      probe.preload = 'metadata'
+      probe.src = url
+    })
+  } finally {
+    probe.onloadedmetadata = null
+    probe.onerror = null
+    probe.removeAttribute('src')
+    probe.load()
+    URL.revokeObjectURL(url)
+  }
+  const updated: Track = {
+    ...track,
+    audio: `local:${track.id}`,
+    duration,
+    localAudio: {
+      name: file.name,
+      originalDuration: track.localAudio?.originalDuration ?? track.duration,
+    },
+  }
+  const entry = { id: track.id, track: updated, size: file.size, savedAt: Date.now() }
+  const transaction = db.transaction(['audio', 'tracks'], 'readwrite')
+  transaction.objectStore('audio').put({ id: track.id, blob: file })
+  transaction.objectStore('tracks').put(entry)
+  await complete(transaction)
+  return entry
+}
+
 export async function downloadTrack(
   track: Track,
   signal: AbortSignal,

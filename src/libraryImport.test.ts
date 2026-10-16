@@ -1,10 +1,61 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { parseLibraryFile, prepareLibraryImport, persistLibraryImport } from './libraryImport'
+import {
+  decodeLibraryText,
+  parseLibraryFile,
+  prepareLibraryImport,
+  persistLibraryImport,
+} from './libraryImport'
 
 afterEach(() => vi.unstubAllGlobals())
 const options = { title: 'Моя коллекция', allLiked: false, keepPlaylists: true }
 
 describe('Yandex CSV and JSON library import', () => {
+  it('reads artist-title TXT, keeps collaborations together and removes duplicate lines', () => {
+    const file = parseLibraryFile(
+      'Polar Echo - First Light\nСевер - Ночной маршрут\nØMEN, GUEST - Signal\nPolar Echo - First Light',
+      'Мне нравится.txt',
+    )
+    expect(file.songs.map(({ artist, title }) => ({ artist, title }))).toEqual([
+      { artist: 'Polar Echo', title: 'First Light' },
+      { artist: 'Север', title: 'Ночной маршрут' },
+      { artist: 'ØMEN, GUEST', title: 'Signal' },
+    ])
+    expect(file).toMatchObject({ duplicates: 1, skipped: 0, textLayout: true })
+  })
+  it('previews the reverse text layout and preserves hyphenated artist names and title punctuation', () => {
+    const file = parseLibraryFile(
+      '1. All The Small Things — Blink-182\n2. Deja Vu (chill, wave vibe);supwel\nБез разделителя',
+      'список.txt',
+      'title-artist',
+    )
+    expect(file.songs[0]).toMatchObject({ artist: 'Blink-182', title: 'All The Small Things' })
+    expect(file.songs[1]).toMatchObject({ artist: 'supwel', title: 'Deja Vu (chill, wave vibe)' })
+    expect(file.skipped).toBe(1)
+    expect(() => parseLibraryFile('supwel Deja Vu', 'список.txt')).toThrow('Исполнитель — Название')
+  })
+  it('reads table headers and labelled artist/title pairs in a text file', () => {
+    expect(
+      parseLibraryFile('Исполнитель\tНазвание\nØMEN, GUEST\tSignal', 'music.txt').songs[0],
+    ).toMatchObject({ artist: 'ØMEN, GUEST', title: 'Signal' })
+    expect(
+      parseLibraryFile('Исполнитель: КИНО\nНазвание: Звезда по имени Солнце', 'music.txt').songs[0],
+    ).toMatchObject({ artist: 'КИНО', title: 'Звезда по имени Солнце' })
+  })
+  it('decodes Windows Notepad UTF-16 and Windows-1251 while refusing binary data', () => {
+    const text = 'ØDEN, DUSKYN - Blink\nКИНО - Звезда'
+    const utf16 = new Uint8Array([0xff, 0xfe, ...new Uint8Array(Buffer.from(text, 'utf16le'))])
+    expect(decodeLibraryText(utf16.buffer)).toBe(text)
+    const legacy = new Uint8Array([
+      0xca, 0xc8, 0xcd, 0xce, 0x20, 0x2d, 0x20, 0xc7, 0xe2, 0xe5, 0xe7, 0xe4, 0xe0,
+    ])
+    expect(parseLibraryFile(decodeLibraryText(legacy.buffer), 'old.txt').songs[0]).toMatchObject({
+      artist: 'КИНО',
+      title: 'Звезда',
+    })
+    expect(() => decodeLibraryText(new Uint8Array([0, 0, 0, 0, 3]).buffer)).toThrow(
+      'текстовый список',
+    )
+  })
   it('reads BOM, semicolons, escaped quotes and merges favourites across duplicate playlist rows', () => {
     const file = parseLibraryFile(
       '\ufeffНазвание;Исполнитель;Альбом;Плейлист;Избранное;ID\r\n"Звук; ""Ночь""";Группа;Альбом;Ночь;false;42\r\n"Звук; ""Ночь""";Группа;Альбом;Дорога;да;42\r\n;Без названия;;;;',

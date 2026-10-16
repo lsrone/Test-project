@@ -31,3 +31,26 @@ it('migrates an existing append-ordered library once without losing favourites o
   migrateNewestFirst(storage)
   expect(JSON.parse(values.get('volna.liked')!)).toEqual(['newer', 'older'])
 })
+it('keeps a user audio attachment when the same YouTube metadata is fetched again', () => {
+  const local = {
+    ...tracks[0],
+    id: 'youtube:jfKfPfyJRdk',
+    source: 'youtube' as const,
+    audio: 'local:youtube:jfKfPfyJRdk',
+    localAudio: { name: 'mine.mp3', originalDuration: 180 },
+  }
+  const incoming = {
+    ...local,
+    audio: '',
+    localAudio: undefined,
+    duration: 180,
+    title: 'Refreshed metadata',
+  }
+  const result = prependNewTracks([local], [incoming])[0]
+  expect(result).toMatchObject({
+    audio: local.audio,
+    duration: 48,
+    localAudio: local.localAudio,
+    title: 'Refreshed metadata',
+  })
+})

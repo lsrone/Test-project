@@ -50,5 +50,19 @@ export function prependNewTracks(previous: Track[], incoming: Track[]): Track[] 
   const known = new Set(previous.map((track) => track.id))
   return [...updates.values()]
     .filter((track) => !known.has(track.id))
-    .concat(previous.map((track) => updates.get(track.id) || track))
+    .concat(
+      previous.map((track) => {
+        const update = updates.get(track.id)
+        if (!update) return track
+        // Refreshing remote metadata must not detach the user's local audio file.
+        return track.localAudio && !update.localAudio
+          ? {
+              ...update,
+              localAudio: track.localAudio,
+              audio: track.audio,
+              duration: track.duration,
+            }
+          : update
+      }),
+    )
 }
