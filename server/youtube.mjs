@@ -1,8 +1,13 @@
+import { readFileSync } from 'node:fs'
+import { audioFailure, safeAudioDiagnostic } from './audio-errors.mjs'
 import { EnvHttpProxyAgent } from 'undici'
 import { createPublicYouTubeSearch, ExpiredYouTubePage } from './public-youtube.mjs'
 import { createYouTubeAudio, AudioUnavailable } from './youtube-audio.mjs'
 import { sameRecording } from './music-matching.mjs'
 
+const version = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+).version
 const agent = new EnvHttpProxyAgent()
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/
 
@@ -59,9 +64,13 @@ export function createYouTubeApi({
       if (!VIDEO_ID.test(id)) return reply(res, 400, { message: 'Некорректная ссылка на запись.' })
       try {
         await audio.stream(req, res, id)
-      } catch {
+      } catch (error) {
         if (res.headersSent) res.destroy()
-        else reply(res, 502, { message: 'Аудио этой записи недоступно. Попробуй другую запись.' })
+        else
+          reply(res, 502, {
+            message: audioFailure(error, 'audio').message,
+            diagnostic: { ...safeAudioDiagnostic(error), version, videoId: id },
+          })
       }
       return
     }
@@ -123,10 +132,8 @@ export function createYouTubeApi({
           }
         }
         return reply(res, 503, {
-          message:
-            error instanceof AudioUnavailable
-              ? error.message
-              : 'Не удалось получить аудио YouTube. Проверь доступ к источнику и попробуй ещё раз.',
+          message: audioFailure(error).message,
+          diagnostic: { ...safeAudioDiagnostic(error), version, videoId: id },
         })
       }
     }

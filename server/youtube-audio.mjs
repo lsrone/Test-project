@@ -1,10 +1,12 @@
-import { Innertube, Utils } from 'youtubei.js'
+import { Innertube, Player, Utils, YT } from 'youtubei.js'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { evaluatePlayerScript } from './player-evaluator.mjs'
 
+import { AudioSourceError, AudioUnavailable, audioFailure } from './audio-errors.mjs'
+export { AudioUnavailable } from './audio-errors.mjs'
+
 const ID = /^[A-Za-z0-9_-]{11}$/
-export class AudioUnavailable extends Error {}
 export function mediaURL(value) {
   const url = new URL(value)
   if (
@@ -22,6 +24,35 @@ export function createYouTubeAudio({ fetcher, getClient } = {}) {
   let client
   const cache = new Map()
   const pending = new Map()
+  let playerLoading
+  async function transport(input, options) {
+    const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url)
+    const stage = url.hostname.endsWith('.googlevideo.com')
+      ? 'audio'
+      : /\/s\/player\/|\/iframe_api/.test(url.pathname)
+        ? 'player'
+        : 'metadata'
+    try {
+      const response = await fetcher(input, options)
+      if (!response.ok && stage !== 'audio') {
+        await response.body?.cancel()
+        throw new AudioSourceError('HTTP', stage, { httpStatus: response.status })
+      }
+      return response
+    } catch (error) {
+      throw audioFailure(error, stage)
+    }
+  }
+  async function player(yt) {
+    if (yt.session.player) return yt.session.player
+    if (!playerLoading)
+      playerLoading = Player.create(undefined, transport).catch((error) => {
+        playerLoading = undefined
+        throw audioFailure(error, 'player')
+      })
+    yt.session.player = await playerLoading
+    return yt.session.player
+  }
   async function youtube() {
     if (!client)
       client = (
@@ -30,12 +61,12 @@ export function createYouTubeAudio({ fetcher, getClient } = {}) {
           : Innertube.create({
               lang: 'ru',
               location: 'US',
-              retrieve_player: true,
+              retrieve_player: false,
               retrieve_innertube_config: false,
               generate_session_locally: true,
               enable_session_cache: false,
               enable_safety_mode: true,
-              fetch: fetcher,
+              fetch: transport,
             })
       ).catch((error) => {
         client = undefined
@@ -45,7 +76,7 @@ export function createYouTubeAudio({ fetcher, getClient } = {}) {
   }
   async function follow(url, options) {
     for (let i = 0; i < 4; i++) {
-      const response = await fetcher(mediaURL(url), { ...options, redirect: 'manual' })
+      const response = await transport(mediaURL(url), { ...options, redirect: 'manual' })
       if (![301, 302, 303, 307, 308].includes(response.status)) return response
       await response.body?.cancel()
       const location = response.headers.get('location')
@@ -54,6 +85,38 @@ export function createYouTubeAudio({ fetcher, getClient } = {}) {
     }
     throw new AudioUnavailable('Источник аудио не ответил.')
   }
+  async function information(yt, id) {
+    let response
+    try {
+      response = await yt.actions.execute('/player', {
+        videoId: id,
+        client: 'WEB',
+        playbackContext: {
+          contentPlaybackContext: { signatureTimestamp: yt.session.player?.signature_timestamp },
+        },
+      })
+    } catch (error) {
+      throw audioFailure(error, 'metadata')
+    }
+    const raw = response.data?.playerResponse || response.data
+    const status = raw?.playabilityStatus
+    if (status?.status === 'LOGIN_REQUIRED')
+      throw new AudioSourceError('LOGIN_REQUIRED', 'metadata', { providerStatus: status.status })
+    if (status?.status !== 'OK')
+      throw new AudioUnavailable(undefined, 'UNAVAILABLE', { providerStatus: status?.status })
+    // YouTube.js coerces a missing playableInEmbed to false. Only an explicit
+    // provider refusal is a restriction; absence of the field is not one.
+    if (status.playableInEmbed === false)
+      throw new AudioUnavailable(
+        'Автор запретил воспроизведение этой записи в приложениях.',
+        'EMBED_BLOCKED',
+      )
+    return new YT.VideoInfo(
+      [{ ...response, data: raw }],
+      yt.actions,
+      Utils.generateRandomString(16),
+    )
+  }
   async function resolve(id) {
     if (!ID.test(id)) throw new AudioUnavailable('Некорректная ссылка на запись.')
     const cached = cache.get(id)
@@ -61,44 +124,52 @@ export function createYouTubeAudio({ fetcher, getClient } = {}) {
     if (pending.has(id)) return pending.get(id)
     const operation = (async () => {
       const yt = await youtube()
-      let info
-      try {
-        info = await yt.getBasicInfo(id, { client: 'ANDROID' })
-      } catch (error) {
-        if (error?.info?.status && error.info.status !== 'OK')
-          throw new AudioUnavailable(
-            'Эта запись недоступна. Можно подобрать другую доступную запись.',
+      let info = await information(yt, id)
+      const formatsFor = (info) =>
+        (info.streaming_data?.adaptive_formats || [])
+          .filter(
+            (format) =>
+              format.has_audio &&
+              !format.has_video &&
+              /^audio\/(mp4|webm)/.test(format.mime_type || '') &&
+              !format.drm_families?.length &&
+              !format.drm_track_type &&
+              !format.fair_play_key_uri,
           )
-        throw error
+          .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))
+      let formats = formatsFor(info)
+      let format = formats[0]
+      const requiresPlayer = (item) =>
+        item &&
+        (item.signature_cipher ||
+          item.cipher ||
+          (item.url && new URL(item.url).searchParams.has('n')))
+      if (!info.basic_info?.is_live && requiresPlayer(format) && !yt.session.player) {
+        await player(yt)
+        // Ciphered WEB responses depend on the current signature timestamp.
+        info = await information(yt, id)
+        formats = formatsFor(info)
+        format = formats[0]
       }
-      if (info.playability_status?.status !== 'OK' || info.playability_status?.embeddable === false)
-        throw new AudioUnavailable(
-          'Эта запись ограничена источником. Можно подобрать другую доступную запись.',
-        )
-      const formats = (info.streaming_data?.adaptive_formats || [])
-        .filter(
-          (format) =>
-            format.has_audio &&
-            !format.has_video &&
-            /^audio\/(mp4|webm)/.test(format.mime_type || '') &&
-            !format.drm_families?.length &&
-            !format.drm_track_type &&
-            !format.fair_play_key_uri,
-        )
-        .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))
       if (!formats.length || info.basic_info?.is_live)
-        throw new AudioUnavailable('Источник не предоставил доступный аудиопоток для этой записи.')
+        throw new AudioUnavailable(
+          'YouTube не предоставил доступный аудиопоток для этой записи.',
+          'NO_AUDIO',
+        )
       Utils.Platform.shim.eval = evaluatePlayerScript
-      const format = formats[0]
-      const url = mediaURL(await format.decipher(yt.session.player))
+      let url
+      try {
+        const decipher = requiresPlayer(format) ? await player(yt) : yt.session.player
+        url = mediaURL(await format.decipher(decipher))
+      } catch (error) {
+        if (error instanceof AudioSourceError) throw error
+        throw new AudioSourceError('PLAYER_SCRIPT', 'player')
+      }
       const probe = await follow(url.href, {
         headers: { Range: 'bytes=0-0', 'Accept-Encoding': 'identity' },
       })
       await probe.body?.cancel()
-      if (!probe.ok)
-        throw new AudioUnavailable(
-          'Аудио этой записи сейчас недоступно. Можно подобрать другую запись.',
-        )
+      if (!probe.ok) throw new AudioSourceError('HTTP', 'audio', { httpStatus: probe.status })
       const value = {
         url: url.href,
         mime: format.mime_type,
@@ -144,7 +215,7 @@ export function createYouTubeAudio({ fetcher, getClient } = {}) {
       if (![200, 206, 416].includes(upstream.status)) {
         cache.delete(id)
         await upstream.body?.cancel()
-        throw new AudioUnavailable('Аудио этой записи сейчас недоступно. Выбери другую запись.')
+        throw new AudioSourceError('HTTP', 'audio', { httpStatus: upstream.status })
       }
       res.statusCode = upstream.status
       res.setHeader('Content-Type', source.mime)

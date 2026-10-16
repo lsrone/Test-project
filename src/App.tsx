@@ -197,6 +197,7 @@ export default function App() {
   const [installEvent, setInstallEvent] = useState<InstallEvent | null>(null)
   const [youtubeError, setYoutubeError] = useState('')
   const [youtubeNotice, setYoutubeNotice] = useState('')
+  const [youtubeDiagnostic, setYoutubeDiagnostic] = useState('')
   const playbackController = useRef<AbortController | null>(null)
   const youtubeSearchQueue = useRef(false)
   const audio = useRef<HTMLAudioElement>(null)
@@ -445,6 +446,7 @@ export default function App() {
     let selected = track
     let source = track.audio
     setYoutubeNotice('')
+    setYoutubeDiagnostic('')
     if (track.source === 'youtube' && track.youtubeId) {
       autoplay.current = false
       audio.current?.pause()
@@ -468,7 +470,10 @@ export default function App() {
         })
         const data = await response.json()
         if (request !== playbackRequest.current) return
-        if (!response.ok) throw new Error(data.message || 'Аудио этой записи недоступно.')
+        if (!response.ok) {
+          if (data.diagnostic) setYoutubeDiagnostic(JSON.stringify(data.diagnostic, null, 2))
+          throw new Error(data.message || 'Аудио этой записи недоступно.')
+        }
         if (data.replacement) {
           selected = { ...youtubeTrack(data), duration: data.duration || 0 }
           importTracks([selected])
@@ -1829,6 +1834,21 @@ export default function App() {
               onClick={() => openYouTube(`${current.artist} ${current.title}`.slice(0, 120))}
             >
               Другая запись <Search size={15} />
+            </button>
+          )}
+          {youtubeError && youtubeDiagnostic && (
+            <button
+              className="text-button"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(youtubeDiagnostic)
+                  notify('Диагностика скопирована')
+                } catch {
+                  notify(youtubeDiagnostic)
+                }
+              }}
+            >
+              Копировать диагностику
             </button>
           )}
           <button

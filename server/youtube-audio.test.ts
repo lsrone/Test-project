@@ -8,23 +8,35 @@ import { createYouTubeApi } from './youtube.mjs'
 const address = 'https://rr1.example.googlevideo.com/videoplayback?expire=9999999999'
 function info(overrides = {}) {
   return {
-    session: { player: {} },
-    getBasicInfo: async () => ({
-      playability_status: { status: 'OK', embeddable: true },
-      basic_info: { duration: 48 },
-      streaming_data: {
-        adaptive_formats: [
-          {
-            has_audio: true,
-            has_video: false,
-            mime_type: 'audio/mp4',
-            bitrate: 128000,
-            decipher: async () => address,
+    session: {},
+    actions: {
+      execute: async () => ({
+        success: true,
+        status_code: 200,
+        data: {
+          playabilityStatus: { status: 'OK', playableInEmbed: true },
+          videoDetails: {
+            videoId: 'jfKfPfyJRdk',
+            title: 'Song',
+            author: 'Artist',
+            lengthSeconds: '48',
+            thumbnail: { thumbnails: [] },
           },
-        ],
-      },
-      ...overrides,
-    }),
+          streamingData: {
+            adaptiveFormats: [
+              {
+                itag: 140,
+                audioQuality: 'AUDIO_QUALITY_MEDIUM',
+                mimeType: 'audio/mp4',
+                bitrate: 128000,
+                url: address,
+              },
+            ],
+          },
+          ...overrides,
+        },
+      }),
+    },
   }
 }
 describe('audio transport without video', () => {
@@ -72,21 +84,22 @@ describe('audio transport without video', () => {
   })
   it('rejects restricted/DRM/video-only formats and private-network redirects', async () => {
     for (const overrides of [
-      { playability_status: { status: 'LOGIN_REQUIRED' } },
-      { playability_status: { status: 'OK', embeddable: false } },
+      { playabilityStatus: { status: 'LOGIN_REQUIRED' } },
+      { playabilityStatus: { status: 'OK', playableInEmbed: false } },
       {
-        streaming_data: {
-          adaptive_formats: [{ has_audio: true, has_video: true, mime_type: 'video/mp4' }],
+        streamingData: {
+          adaptiveFormats: [
+            { audioQuality: 'AUDIO_QUALITY_MEDIUM', qualityLabel: '720p', mimeType: 'video/mp4' },
+          ],
         },
       },
       {
-        streaming_data: {
-          adaptive_formats: [
+        streamingData: {
+          adaptiveFormats: [
             {
-              has_audio: true,
-              has_video: false,
-              mime_type: 'audio/mp4',
-              drm_families: ['WIDEVINE'],
+              audioQuality: 'AUDIO_QUALITY_MEDIUM',
+              mimeType: 'audio/mp4',
+              drmFamilies: ['WIDEVINE'],
             },
           ],
         },

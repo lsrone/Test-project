@@ -1,5 +1,7 @@
-import { app, BrowserWindow, dialog, Menu, nativeTheme, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, nativeTheme, shell, net } from 'electron'
 import { join } from 'node:path'
+import { createYouTubeApi } from '../server/youtube.mjs'
+import { desktopFetch } from './network.mjs'
 import { startAppServer } from '../server/app-server.mjs'
 
 let service
@@ -18,7 +20,10 @@ else {
     nativeTheme.themeSource = 'dark'
     try {
       // The fixed loopback origin keeps the music library stable between launches.
-      service = await startAppServer({ root: join(app.getAppPath(), 'dist') })
+      service = await startAppServer({
+        root: join(app.getAppPath(), 'dist'),
+        youtubeApi: createYouTubeApi({ fetcher: desktopFetch((...args) => net.fetch(...args)) }),
+      })
       window = new BrowserWindow({
         width: 1450,
         height: 960,

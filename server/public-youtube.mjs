@@ -6,8 +6,8 @@ const TTL = 15 * 60 * 1000
 
 export class ExpiredYouTubePage extends Error {}
 
-// Public search metadata only. Playback stays in the official YouTube iframe.
-// No cookies, account login, player scripts or audio extraction are needed.
+// Public metadata search; audio transport is separate in youtube-audio.mjs.
+// No cookies or account login are used.
 export function createPublicYouTubeSearch({ fetcher, now = Date.now }) {
   let client
   const pages = new Map()

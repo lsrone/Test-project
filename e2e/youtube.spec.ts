@@ -178,3 +178,55 @@ test('search errors have an external link and direct audio links remain usable',
   await expect(page.getByRole('button', { name: 'Пауза', exact: true })).toBeVisible()
   await expect(page.locator('iframe,video')).toHaveCount(0)
 })
+
+test('transport failures expose safe copyable diagnostics and local audio still works', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.route('**/api/youtube/status', (route) =>
+    route.fulfill({ json: { configured: true } }),
+  )
+  await page.route('**/api/youtube/search?**', (route) =>
+    route.fulfill({ json: { items: [{ id: '4xDzrJKXOOY', title: 'Song', channel: 'Artist' }] } }),
+  )
+  await page.route('**/api/youtube/resolve?**', (route) =>
+    route.fulfill({
+      status: 503,
+      json: {
+        message: 'YouTube отклонил запрос приложения (HTTP 403).',
+        diagnostic: {
+          code: 'HTTP',
+          stage: 'metadata',
+          httpStatus: 403,
+          version: '1.2.1',
+          videoId: '4xDzrJKXOOY',
+        },
+      },
+    }),
+  )
+  await page.goto('/')
+  await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('song')
+  await page.getByRole('button', { name: 'Слушать Song', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('HTTP 403')
+  await expect(page.getByRole('button', { name: 'Воспроизвести', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Копировать диагностику', exact: true }).click()
+  const diagnostic = await page.evaluate(() => navigator.clipboard.readText())
+  expect(JSON.parse(diagnostic)).toEqual({
+    code: 'HTTP',
+    stage: 'metadata',
+    httpStatus: 403,
+    version: '1.2.1',
+    videoId: '4xDzrJKXOOY',
+  })
+  await page
+    .locator('.sidebar-playlists')
+    .getByRole('button', { name: /Ночной город/ })
+    .click()
+  await page.getByRole('button', { name: 'Слушать Blue Hour', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Пауза', exact: true })).toBeVisible()
+  await expect
+    .poll(() => page.locator('audio').evaluate((audio: HTMLAudioElement) => audio.currentTime))
+    .toBeGreaterThan(0.1)
+  await expect(page.locator('iframe,video')).toHaveCount(0)
+})
