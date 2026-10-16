@@ -1,3 +1,4 @@
+import { preferenceWeights, preferenceTags, type TasteOptions } from './musicTaste'
 import type { Mood, Track } from './catalog'
 import { CATALOG_PAGE_SIZE, findReleases, loadRelease } from './openCatalog'
 
@@ -11,9 +12,10 @@ interface WaveOptions {
   liked: string[]
   history: string[]
   mood: Mood
+  preferences?: TasteOptions
 }
 
-export function waveQuery({ tracks, liked, history, mood }: WaveOptions): string {
+export function waveQuery({ tracks, liked, history, mood, preferences }: WaveOptions): string {
   const moods: Record<Mood, string> = {
     all: '',
     chill: 'chill',
@@ -31,15 +33,18 @@ export function waveQuery({ tracks, liked, history, mood }: WaveOptions): string
     Рок: 'rock',
     'Лоу-фай': 'lofi',
     'Дрим-поп': 'dream pop',
+    Вейв: 'downtempo',
+    Чилл: 'chill',
+    Фонк: 'electronic',
   }
   const scores = new Map<string, number>()
-  for (const [ids, weight] of [
-    [liked, 4],
-    [history.slice(0, 10), 1],
-  ] as const) {
-    for (const id of ids) {
-      const track = tracks.find((item) => item.id === id)
-      const query = track && genres[track.genre]
+  const weights = preferenceWeights(tracks, liked, history, preferences)
+  for (const track of tracks) {
+    const weight = weights.get(track.id) || 0
+    if (weight <= 0) continue
+    const tags = [track.genre, ...preferenceTags(track, preferences)]
+    for (const tag of new Set(tags)) {
+      const query = genres[tag]
       if (query) scores.set(query, (scores.get(query) || 0) + weight)
     }
   }

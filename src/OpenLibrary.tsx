@@ -18,7 +18,6 @@ interface Props {
   onImport: (tracks: Track[]) => void
   onPlay: (track: Track, queue: string[]) => void
   renderTracks: (tracks: Track[]) => ReactNode
-  onYouTube: (query: string) => void
 }
 
 export default function OpenLibrary({
@@ -27,7 +26,6 @@ export default function OpenLibrary({
   onImport,
   onPlay,
   renderTracks,
-  onYouTube,
 }: Props) {
   const [query, setQuery] = useState(initialQuery)
   const [activeQuery, setActiveQuery] = useState(initialQuery)
@@ -312,10 +310,10 @@ export default function OpenLibrary({
             <div className="empty-state">
               <Search size={42} />
               <h2>В открытом каталоге ничего не нашлось</h2>
-              <p>Попробуй другое имя или жанр. Для коммерческих релизов есть поиск YouTube.</p>
-              <button className="primary-button" onClick={() => onYouTube(query)}>
-                Искать на YouTube <ArrowRight size={16} />
-              </button>
+              <p>
+                Попробуй другое имя или жанр. В каталоге независимая музыка; коммерческие записи
+                могут отсутствовать.
+              </p>
             </div>
           )}
           {page * CATALOG_PAGE_SIZE < total && (
@@ -352,9 +350,6 @@ export default function OpenLibrary({
           Записи воспроизводятся с серверов Internet Archive. Доступность и условия определяет
           источник.
         </span>
-        <button className="text-button" onClick={() => onYouTube(query)}>
-          Найти музыку на YouTube <ArrowRight size={15} />
-        </button>
       </div>
     </div>
   )

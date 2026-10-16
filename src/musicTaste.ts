@@ -50,6 +50,15 @@ export function musicalTags(text: string) {
     moods: [...new Set(found.flatMap(([, , moods]) => moods))],
   }
 }
+export function preferenceTags(track: Track, options: TasteOptions = {}) {
+  const query = options.choices?.find((choice) => choice.trackId === track.id)?.query || ''
+  return [
+    ...new Set([
+      ...(track.tags || []),
+      ...musicalTags(`${track.genre} ${track.title} ${track.artist} ${query}`).tags,
+    ]),
+  ]
+}
 export function preferenceWeights(
   catalog: Track[],
   liked: string[],
@@ -67,18 +76,4 @@ export function preferenceWeights(
   for (const [id, stat] of Object.entries(options.listening || {}))
     add(id, Math.log2(1 + stat.plays) + stat.completions * 2 - Math.min(stat.skips, 5) * 3)
   return new Map(catalog.map((track) => [track.id, weights.get(track.id) || 0]))
-}
-export function personalSeeds(
-  catalog: Track[],
-  liked: string[],
-  history: string[],
-  options: TasteOptions = {},
-) {
-  const weights = preferenceWeights(catalog, liked, history, options)
-  return catalog
-    .filter(
-      (track) => track.source === 'youtube' && track.youtubeId && (weights.get(track.id) || 0) > 0,
-    )
-    .sort((a, b) => (weights.get(b.id) || 0) - (weights.get(a.id) || 0))
-    .slice(0, 5)
 }

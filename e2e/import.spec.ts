@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test'
-import { mockYouTubePlayback } from './youtube-fixture'
+import { mockArchive } from './archive-fixture'
 
 test.use({ serviceWorkers: 'block' })
 
-test('imports 128 CSV tracks, merges repeated imports, persists playlists and favourites, and searches YouTube', async ({
+test('imports 128 CSV tracks, merges repeated imports, persists playlists and favourites, and searches the audio catalogue', async ({
   page,
 }) => {
   const rows = Array.from(
@@ -17,18 +17,7 @@ test('imports 128 CSV tracks, merges repeated imports, persists playlists and fa
   page.on('request', (request) => {
     if (['POST', 'PUT'].includes(request.method())) sent.push(request.url())
   })
-  await page.route('**/api/youtube/status', (route) =>
-    route.fulfill({ json: { configured: true } }),
-  )
-  await page.route('**/api/youtube/search?**', (route) => {
-    expect(new URL(route.request().url()).searchParams.get('q')).toBe('Artist 1 My track 127')
-    return route.fulfill({
-      json: {
-        items: [{ id: 'jfKfPfyJRdk', title: 'Matched imported recording', channel: 'Artist 1' }],
-      },
-    })
-  })
-  await mockYouTubePlayback(page)
+  const queries = await mockArchive(page, { title: 'Matched imported recording' })
   await page.goto('/')
   await page.getByRole('button', { name: 'Перенести библиотеку', exact: true }).click()
   await page.getByLabel('Файл экспорта Яндекс Музыки').setInputFiles(upload)
@@ -56,9 +45,15 @@ test('imports 128 CSV tracks, merges repeated imports, persists playlists and fa
   await page.getByRole('tab', { name: 'В библиотеке' }).click()
   await expect(page.locator('.track-row')).toHaveCount(128)
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('My track 127')
-  await page.getByRole('button', { name: 'Найти My track 127 на YouTube', exact: true }).click()
-  await expect(page.locator('.youtube-result')).toHaveCount(1)
-  await page.getByRole('button', { name: 'Включить Matched imported recording' }).click()
+  await page.getByRole('button', { name: 'Найти My track 127 в каталоге', exact: true }).click()
+  await expect(page.locator('.audio-search .track-row')).toHaveCount(4)
+  await expect(page.getByRole('textbox', { name: 'Поиск музыки' })).toHaveValue(
+    'Artist 1 My track 127',
+  )
+  expect(queries.some((query) => query.includes('Artist AND 1 AND My AND track AND 127'))).toBe(
+    true,
+  )
+  await page.getByRole('button', { name: 'Слушать Matched imported recording' }).click()
   await expect(page.locator('iframe,video')).toHaveCount(0)
   await expect(page.locator('audio')).toHaveJSProperty('paused', false)
   expect(sent).toEqual([])

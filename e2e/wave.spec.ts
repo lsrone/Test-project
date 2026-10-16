@@ -12,7 +12,7 @@ async function provider(
   } = { unavailable: false, slowInitial: false },
 ) {
   const searches: string[] = []
-  await page.route('https://archive.org/advancedsearch.php?**', (route) => {
+  await page.route('**/api/archive/search?**', (route) => {
     const url = new URL(route.request().url())
     const query = url.searchParams.get('q') || ''
     searches.push(query)
@@ -37,7 +37,7 @@ async function provider(
       },
     })
   })
-  await page.route('https://archive.org/metadata/**', async (route) => {
+  await page.route('**/api/archive/metadata/**', async (route) => {
     const id = new URL(route.request().url()).pathname.split('/').pop()!
     if (settings.slowInitial && id.startsWith('all-'))
       await new Promise((resolve) => setTimeout(resolve, 600))
@@ -57,11 +57,11 @@ async function provider(
       })
       .catch(() => {})
   })
-  await page.route('https://archive.org/services/img/**', (route) =>
+  await page.route('**/api/archive/artwork/**', (route) =>
     route.fulfill({ path: 'public/app-icon-192.png' }),
   )
   const audio = await readFile('public/audio/blue-hour.mp3')
-  await page.route('https://archive.org/download/**', (route) => {
+  await page.route('**/api/archive/audio?**', (route) => {
     const range = /^bytes=(\d+)-(\d*)$/.exec(route.request().headers().range || '')
     const start = range ? Number(range[1]) : 0
     const end = range?.[2] ? Math.min(Number(range[2]), audio.length - 1) : audio.length - 1
@@ -88,7 +88,7 @@ test('discovers 120 distinct tracks across catalogue pages, persists them, and p
   await provider(page, { unavailable: false, slowInitial: false, totalReleases: 60 })
   const requestedPages = new Set<number>()
   page.on('request', (request) => {
-    if (request.url().startsWith('https://archive.org/advancedsearch.php?'))
+    if (request.url().includes('/api/archive/search?'))
       requestedPages.add(Number(new URL(request.url()).searchParams.get('page')))
   })
   await page.goto('/')
@@ -184,7 +184,7 @@ test('changing mood cancels stale discoveries and shows tracks matching the new 
 }) => {
   await provider(page, { unavailable: false, slowInitial: true })
   await page.goto('/')
-  const firstAlbum = page.waitForRequest('https://archive.org/metadata/all-0')
+  const firstAlbum = page.waitForRequest('**/api/archive/metadata/all-0')
   await page.locator('.primary-nav').getByRole('button', { name: 'Моя волна', exact: true }).click()
   await firstAlbum
   await page

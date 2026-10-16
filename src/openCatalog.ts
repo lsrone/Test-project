@@ -1,3 +1,5 @@
+import { archiveResource } from './audioSource'
+import { musicalTags } from './musicTaste'
 import type { Mood, Track } from './catalog'
 
 export const CATALOG_PAGE_SIZE = 24
@@ -42,7 +44,7 @@ const parseDuration = (value: unknown) => {
 }
 
 async function readJson(url: URL, signal?: AbortSignal) {
-  const response = await fetch(url, {
+  const response = await fetch(archiveResource(url.href), {
     signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(18000)]),
     credentials: 'omit',
     referrerPolicy: 'no-referrer',
@@ -98,7 +100,7 @@ export async function findReleases(
         artist: text(item.creator) || 'Независимый релиз',
         year: text(item.year),
         license: text(item.licenseurl),
-        cover: `https://archive.org/services/img/${item.identifier}`,
+        cover: archiveResource(`https://archive.org/services/img/${item.identifier}`),
       })),
   }
 }
@@ -161,6 +163,7 @@ export function releaseTracks(release: CatalogRelease, metadata: Record<string, 
       audio: `https://archive.org/download/${encodeURIComponent(release.id)}/${name.split('/').map(encodeURIComponent).join('/')}`,
       duration: parseDuration(file.length || file.duration),
       moods: mood,
+      tags: musicalTags(tags).tags,
       source: 'archive' as const,
       sourceUrl: `https://archive.org/details/${release.id}`,
       artworkUrl: release.cover,

@@ -324,7 +324,7 @@ export function prepareLibraryImport(
   const importedPlaylists: Playlist[] = [...groups].map(([name, ids]) => ({
     id: `yandex-playlist-${stableId(normalize(name))}`,
     title: name,
-    description: 'Перенесено из Яндекс Музыки · записи можно найти на YouTube',
+    description: 'Перенесено из Яндекс Музыки · поиск записей в аудиокаталоге',
     artwork: 'blue',
     color: '#477bf4',
     tracks: [...new Set(ids)],

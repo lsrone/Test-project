@@ -29,7 +29,7 @@ describe('public music catalog', () => {
     const result = await findReleases('ambient', 3)
     expect(result.total).toBe(340)
     expect(result.releases.map((item) => item.id)).toEqual(['real-release'])
-    const url = fetcher.mock.calls[0][0] as unknown as URL
+    const url = new URL(String(fetcher.mock.calls[0][0]))
     expect(url.hostname).toBe('archive.org')
     expect(url.searchParams.get('page')).toBe('3')
     expect(url.searchParams.get('q')).toContain('collection:netlabels')

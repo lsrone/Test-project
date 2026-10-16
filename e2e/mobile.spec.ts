@@ -1,38 +1,22 @@
 import { test, expect } from '@playwright/test'
-import { mockYouTubePlayback } from './youtube-fixture'
+import { mockArchive } from './archive-fixture'
 
 // Keep provider fixtures outside the production service worker's fetch handler.
 test.use({ serviceWorkers: 'block' })
 
-test('mobile global search shows YouTube results as a list without overflow', async ({ page }) => {
-  await page.route('**/api/youtube/status', (route) =>
-    route.fulfill({ json: { configured: true } }),
-  )
-  await page.route('**/api/youtube/search?**', (route) =>
-    route.fulfill({
-      json: {
-        items: [
-          {
-            id: 'jfKfPfyJRdk',
-            title: 'Очень длинное название музыкальной записи для проверки списка на узком экране',
-            channel: 'Очень длинное название музыкального канала',
-          },
-          { id: '4xDzrJKXOOY', title: 'Ещё одна запись', channel: 'Другой канал' },
-        ],
-      },
-    }),
-  )
-  await mockYouTubePlayback(page)
+test('mobile global search plays audio rows without video or overflow', async ({ page }) => {
+  await mockArchive(page, {
+    title: 'Очень длинное название музыкальной записи для проверки списка на узком экране',
+    artist: 'Очень длинное имя исполнителя',
+  })
   await page.goto('/')
   await page.locator('.mobile-nav').getByRole('button', { name: 'Поиск', exact: true }).click()
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('Музыка')
-  const list = page.getByRole('list', { name: 'Результаты поиска YouTube' })
-  await expect(list.getByRole('listitem')).toHaveCount(2)
+  await expect(page.locator('.audio-search .track-row')).toHaveCount(4)
   expect(await page.evaluate(() => document.body.scrollWidth <= innerWidth)).toBe(true)
-  await page.getByRole('button', { name: 'Слушать Ещё одна запись', exact: true }).click()
+  await page.getByRole('button', { name: 'Слушать Discovery 1', exact: true }).click()
   await expect(page.locator('iframe,video')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Пауза', exact: true })).toBeVisible()
-  await expect(page.locator('.player-track-info strong')).toHaveText('Ещё одна запись')
   expect(await page.evaluate(() => document.body.scrollWidth <= innerWidth)).toBe(true)
 })
 

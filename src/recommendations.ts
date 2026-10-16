@@ -1,5 +1,6 @@
+import { isPlayable } from './audioSource'
 import { moods, type Mood, type Track } from './catalog'
-import { artistOf, preferenceWeights, type TasteOptions } from './musicTaste'
+import { artistOf, preferenceWeights, preferenceTags, type TasteOptions } from './musicTaste'
 
 /** An explainable local ranking: likes teach genre affinity, plays add a lighter signal.
  * Recent tracks lose priority so the next discovery is actually something different. */
@@ -21,17 +22,17 @@ export function recommend(
     artists.set(artist, (artists.get(artist) || 0) + weight)
     if (!['YouTube', 'Из Яндекс Музыки'].includes(track.genre))
       genres.set(track.genre, (genres.get(track.genre) || 0) + weight)
-    for (const tag of track.tags || []) tags.set(tag, (tags.get(tag) || 0) + weight)
+    for (const tag of preferenceTags(track, options)) tags.set(tag, (tags.get(tag) || 0) + weight)
   }
   const ranked = catalog
-    .filter((t) => t.source !== 'yandex')
+    .filter(isPlayable)
     .filter((t) => mood === 'all' || t.moods.includes(mood))
     .map((track, i) => ({
       track,
       score:
         (genres.get(track.genre) ?? 0) +
         (artists.get(artistOf(track)) || 0) * 1.1 +
-        (track.tags || []).reduce((sum, tag) => sum + (tags.get(tag) || 0) * 0.45, 0) +
+        preferenceTags(track, options).reduce((sum, tag) => sum + (tags.get(tag) || 0) * 0.45, 0) +
         (weights.get(track.recommendationSeed || '') || 0) * 0.8 +
         (liked.includes(track.id) ? 1 : 0) -
         (history.slice(0, 3).includes(track.id) ? 18 : 0) -

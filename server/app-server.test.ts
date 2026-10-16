@@ -16,8 +16,8 @@ async function start() {
   const service = await startAppServer({
     root,
     port: 0,
-    youtubeApi: (req, res, next) => {
-      if (req.url === '/api/youtube/status') {
+    catalogApi: (req, res, next) => {
+      if (req.url === '/api/archive/search') {
         res.setHeader('Content-Type', 'application/json')
         res.end('{"configured":true,"mode":"public"}')
       } else next()
@@ -32,7 +32,7 @@ describe('Windows app local server', () => {
     const page = await fetch(origin)
     expect(await page.text()).toContain('Volna desktop')
     expect(page.headers.get('content-security-policy')).toContain("script-src 'self'")
-    expect(await (await fetch(`${origin}/api/youtube/status`)).json()).toEqual({
+    expect(await (await fetch(`${origin}/api/archive/search`)).json()).toEqual({
       configured: true,
       mode: 'public',
     })

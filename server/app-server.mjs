@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
-import { createYouTubeApi } from './youtube.mjs'
+import { createArchiveApi } from './archive.mjs'
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -19,9 +19,9 @@ const MIME = {
   '.mp3': 'audio/mpeg',
 }
 const CSP =
-  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https://archive.org https://*.archive.org https://i.ytimg.com; media-src 'self' blob: https://archive.org https://*.archive.org; connect-src 'self' https://archive.org https://*.archive.org; frame-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https://archive.org https://*.archive.org; media-src 'self' blob: https://archive.org https://*.archive.org; connect-src 'self' https://archive.org https://*.archive.org; frame-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
 
-export async function startAppServer({ root, port = 28741, youtubeApi = createYouTubeApi() }) {
+export async function startAppServer({ root, port = 28741, catalogApi = createArchiveApi() }) {
   const directory = resolve(root)
   let origin
   const server = createServer(async (req, res) => {
@@ -91,7 +91,7 @@ export async function startAppServer({ root, port = 28741, youtubeApi = createYo
       stream.pipe(res)
     }
     try {
-      await youtubeApi(req, res, () => {
+      await catalogApi(req, res, () => {
         void serve().catch(() => fail(500, 'Unable to read file'))
       })
     } catch {

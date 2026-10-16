@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, Menu, nativeTheme, shell, net } from 'electron'
 import { join } from 'node:path'
-import { createYouTubeApi } from '../server/youtube.mjs'
+import { createArchiveApi } from '../server/archive.mjs'
 import { desktopFetch } from './network.mjs'
 import { startAppServer } from '../server/app-server.mjs'
 
@@ -22,7 +22,7 @@ else {
       // The fixed loopback origin keeps the music library stable between launches.
       service = await startAppServer({
         root: join(app.getAppPath(), 'dist'),
-        youtubeApi: createYouTubeApi({ fetcher: desktopFetch((...args) => net.fetch(...args)) }),
+        catalogApi: createArchiveApi({ fetcher: desktopFetch((...args) => net.fetch(...args)) }),
       })
       window = new BrowserWindow({
         width: 1450,

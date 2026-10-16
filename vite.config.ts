@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { youtubePlugin } from './server/youtube.mjs'
+import { archivePlugin } from './server/archive.mjs'
 
-export default defineConfig({ plugins: [react(), youtubePlugin()] })
+export default defineConfig({ plugins: [react(), archivePlugin()] })

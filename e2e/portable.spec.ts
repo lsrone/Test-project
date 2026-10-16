@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
+import { mockArchive } from './archive-fixture'
 
 test('portable HTML starts with no external files and plays embedded music in a preview', async ({
   page,
@@ -44,20 +45,14 @@ test('portable HTML starts with no external files and plays embedded music in a 
   expect(requests).toEqual([])
 })
 
-test('portable YouTube search opens the requested query without a server or key', async ({
+test('portable HTML searches the public audio source directly and plays music without a server', async ({
   page,
-  context,
 }) => {
-  await context.route('https://www.youtube.com/**', (route) =>
-    route.fulfill({ contentType: 'text/html', body: '<p>YouTube search fixture</p>' }),
-  )
+  await mockArchive(page)
   await page.setContent(await readFile('exports/Volna.html', 'utf8'))
-  await page.locator('.primary-nav').getByRole('button', { name: 'YouTube', exact: true }).click()
-  await page.getByRole('textbox', { name: 'Поиск на YouTube или ссылка' }).fill('джаз пианино')
-  const opened = context.waitForEvent('page')
-  await page.getByRole('button', { name: 'Открыть YouTube', exact: true }).click()
-  const youtube = await opened
-  await expect(youtube).toHaveURL(
-    `https://www.youtube.com/results?search_query=${encodeURIComponent('джаз пианино')}`,
-  )
+  await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('ambient')
+  await expect(page.locator('.audio-search .track-row')).toHaveCount(4)
+  await page.getByRole('button', { name: 'Слушать Ocean Lights', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Пауза', exact: true })).toBeVisible()
+  await expect(page.locator('iframe,video')).toHaveCount(0)
 })

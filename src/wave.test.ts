@@ -52,6 +52,34 @@ describe('wave discovery', () => {
     expect(waveQuery({ tracks, liked: ['blue-hour'], history: [], mood: 'focus' })).toBe('ambient')
   })
 
+  it('learns musical styles from the explicitly selected search query when source genre is unknown', () => {
+    const track = {
+      ...tracks[0],
+      genre: 'Независимая музыка',
+      title: 'Unknown style',
+      artist: 'New Artist',
+      tags: [],
+    }
+    expect(
+      waveQuery({
+        tracks: [track],
+        liked: [],
+        history: [],
+        mood: 'all',
+        preferences: { choices: [{ trackId: track.id, query: 'jazz saxophone', count: 1 }] },
+      }),
+    ).toBe('jazz')
+    expect(
+      waveQuery({
+        tracks: [track],
+        liked: [],
+        history: [],
+        mood: 'all',
+        preferences: { choices: [] },
+      }),
+    ).toBe('')
+  })
+
   it('discovers diverse full tracks and continues without repeated IDs', async () => {
     provider()
     const first = await discoverWave(options())

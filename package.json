@@ -1,7 +1,7 @@
 {
   "name": "volna-music",
   "private": true,
-  "version": "1.2.1",
+  "version": "1.3.0",
   "type": "module",
   "main": "desktop/main.mjs",
   "description": "Volna music player with personal discovery and library import",
@@ -18,15 +18,14 @@
     "desktop:win": "npm run build && electron-builder --config electron-builder.json --win portable --x64",
     "release:windows": "npm run export:html && electron-builder --config electron-builder.json --win portable --x64 && python3 scripts/package_release.py --windows",
     "format": "prettier --write src server e2e scripts/*.mjs *.ts *.json index.html public/manifest.webmanifest README.md",
-    "test:youtube:live": "node scripts/check-live-youtube.mjs"
+    "test:playback:live": "node scripts/check-live-playback.mjs"
   },
   "dependencies": {
     "@fontsource/manrope": "^5.3.0",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "undici": "^6.21.3",
-    "youtubei.js": "18.1.0"
+    "undici": "^6.21.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.0",

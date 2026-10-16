@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 
 async function catalogFixture(page: Page) {
-  await page.route('https://archive.org/advancedsearch.php?**', (route) => {
+  await page.route('**/api/archive/search?**', (route) => {
     const url = new URL(route.request().url())
     const pageNumber = Number(url.searchParams.get('page'))
     return route.fulfill({
@@ -19,13 +19,13 @@ async function catalogFixture(page: Page) {
       },
     })
   })
-  await page.route('https://archive.org/services/img/**', (route) =>
+  await page.route('**/api/archive/artwork/**', (route) =>
     route.fulfill({
       contentType: 'image/svg+xml',
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" fill="#3c638f"/></svg>',
     }),
   )
-  await page.route('https://archive.org/metadata/**', (route) =>
+  await page.route('**/api/archive/metadata/**', (route) =>
     route.fulfill({
       json: {
         metadata: {
@@ -41,7 +41,7 @@ async function catalogFixture(page: Page) {
     }),
   )
   const audio = await readFile('public/audio/blue-hour.mp3')
-  await page.route('https://archive.org/download/**', (route) =>
+  await page.route('**/api/archive/audio?**', (route) =>
     route.fulfill({
       status: 200,
       contentType: 'audio/mpeg',
@@ -150,7 +150,7 @@ test('cancellation of a partial download leaves no offline-ready entry', async (
     const nativeFetch = window.fetch.bind(window)
     window.fetch = async (input, options) => {
       const url = String(input)
-      if (!url.startsWith('https://archive.org/download/')) return nativeFetch(input, options)
+      if (!url.startsWith('/api/archive/audio?')) return nativeFetch(input, options)
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
           controller.enqueue(new Uint8Array(1024))

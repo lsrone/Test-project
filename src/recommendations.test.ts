@@ -1,26 +1,44 @@
 import { describe, expect, it } from 'vitest'
 import { tracks } from './catalog'
 import { recommend, searchTracks } from './recommendations'
-import { youtubeTrack } from './youtube'
-import { personalSeeds } from './musicTaste'
+import { type Track } from './catalog'
+const audioTrack = ({
+  id,
+  title,
+  channel,
+}: {
+  id: string
+  title: string
+  channel: string
+}): Track => ({
+  ...tracks[0],
+  id: `archive:test:${id}.mp3`,
+  title,
+  artist: channel,
+  source: 'archive',
+  genre: 'Независимая музыка',
+  tags: [],
+  audio: `https://archive.org/download/test/${id}.mp3`,
+})
+import { preferenceWeights } from './musicTaste'
 
 describe('personal recommendations', () => {
-  it('uses chosen search results, related discoveries and skips instead of treating every YouTube result as a taste signal', () => {
-    const seed = youtubeTrack({
+  it('uses chosen search results, related discoveries and skips instead of treating every cached audio result as a taste signal', () => {
+    const seed = audioTrack({
       id: 'seed0000001',
       title: 'Artist - Night wave',
       channel: 'Artist - Topic',
     })
-    const sameArtist = youtubeTrack({
+    const sameArtist = audioTrack({
       id: 'same0000001',
       title: 'Artist - New wave',
       channel: 'Artist',
     })
     const related = {
-      ...youtubeTrack({ id: 'more0000001', title: 'New artist - Evening', channel: 'New artist' }),
+      ...audioTrack({ id: 'more0000001', title: 'New artist - Evening', channel: 'New artist' }),
       recommendationSeed: seed.id,
     }
-    const unrelated = youtubeTrack({ id: 'else0000001', title: 'Unrelated', channel: 'Someone' })
+    const unrelated = audioTrack({ id: 'else0000001', title: 'Unrelated', channel: 'Someone' })
     const catalog = [unrelated, seed, sameArtist, related]
     const choices = [{ trackId: seed.id, query: 'night wave', count: 1 }]
     const options = {
@@ -32,7 +50,9 @@ describe('personal recommendations', () => {
     expect(result.findIndex((t) => t.id === unrelated.id)).toBeLessThan(
       result.findIndex((t) => t.id === sameArtist.id),
     )
-    expect(personalSeeds(catalog, [], [], { choices }).map((t) => t.id)).toEqual([seed.id])
+    expect(preferenceWeights(catalog, [], [], { choices }).get(seed.id)).toBeGreaterThan(0)
+    expect(preferenceWeights(catalog, [], [], { choices }).get(unrelated.id)).toBe(0)
+    expect(recommend([{ ...seed, source: 'youtube', audio: '' }], [seed.id], [])).toEqual([])
     expect(new Set(result.map((t) => t.id)).size).toBe(catalog.length)
   })
   it('learns from likes and prioritizes an unheard track in the preferred genre', () => {

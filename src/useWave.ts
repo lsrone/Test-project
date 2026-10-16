@@ -2,9 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Mood, Track } from './catalog'
 import { discoverWave, waveQuery, type WaveCursor } from './wave'
 import { useStoredState } from './storage'
-import { personalSeeds, type TasteOptions } from './musicTaste'
-import { discoverPersonalWave } from './personalWave'
-import { isPortable } from './youtube'
+import { type TasteOptions } from './musicTaste'
 
 export function useWave(options: {
   enabled: boolean
@@ -28,7 +26,6 @@ export function useWave(options: {
   const [error, setError] = useState('')
   const [hasMore, setHasMore] = useState(true)
   const [loadedMood, setLoadedMood] = useState<Mood | null>(null)
-  const [source, setSource] = useState<'youtube' | 'archive'>('archive')
   const preferenceKey = JSON.stringify([
     options.liked,
     options.preferences?.choices?.map((choice) => choice.trackId),
@@ -37,14 +34,8 @@ export function useWave(options: {
 
   const refresh = useCallback(async () => {
     const current = snapshot.current
-    const seeds = isPortable()
-      ? []
-      : personalSeeds(current.tracks, current.liked, current.history, current.preferences)
-    const provider = seeds.length ? 'youtube' : 'archive'
     const query = waveQuery(current)
-    const key = seeds.length
-      ? `youtube:${current.mood}:${seeds.map((seed) => seed.id).join(',')}`
-      : `${current.mood}:${query}`
+    const key = `${current.mood}:${query}`
     if (active.current?.key === key && !active.current.controller.signal.aborted) return
     active.current?.controller.abort()
     const controller = new AbortController()
@@ -59,12 +50,7 @@ export function useWave(options: {
         cursor: cursors.current.get(key),
         signal: controller.signal,
       }
-      const result = seeds.length
-        ? await discoverPersonalWave({ seeds, ...shared })
-        : await discoverWave({
-            query,
-            ...shared,
-          })
+      const result = await discoverWave({ query, ...shared })
       if (controller.signal.aborted) return
       cursors.current.set(key, result.cursor)
       setStoredCursors((previous) => ({ ...previous, [key]: result.cursor }))
@@ -72,7 +58,6 @@ export function useWave(options: {
       setBatch({ ids: result.tracks.map((track) => track.id), mood: current.mood })
       setHasMore(result.hasMore)
       setLoadedMood(current.mood)
-      setSource(provider)
     } catch (cause) {
       if (!controller.signal.aborted) {
         setLoadedMood(current.mood)
@@ -95,5 +80,5 @@ export function useWave(options: {
   }, [options.enabled, options.mood, preferenceKey, refresh])
   useEffect(() => () => active.current?.controller.abort(), [])
 
-  return { batch, loading, error, hasMore, loadedMood, refresh, source }
+  return { batch, loading, error, hasMore, loadedMood, refresh }
 }

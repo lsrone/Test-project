@@ -1,3 +1,4 @@
+import { archiveResource } from './audioSource'
 import type { Track } from './catalog'
 
 export interface SavedTrack {
@@ -89,7 +90,7 @@ export async function downloadTrack(
     throw new Error('Для этого трека нет подтверждённых условий офлайн-сохранения.')
   // Fail before fetching if this preview/browser cannot store the audio.
   const db = await openDatabase()
-  const response = await fetch(track.audio, {
+  const response = await fetch(archiveResource(track.audio), {
     signal,
     credentials: 'omit',
     referrerPolicy: 'no-referrer',
