@@ -22,7 +22,7 @@ else {
       // The fixed loopback origin keeps the music library stable between launches.
       service = await startAppServer({
         root: join(app.getAppPath(), 'dist'),
-        catalogApi: createArchiveApi({ fetcher: desktopFetch((...args) => net.fetch(...args)) }),
+        catalogApi: createArchiveApi({ fetcher: desktopFetch((...args) => net.request(...args)) }),
       })
       window = new BrowserWindow({
         width: 1450,

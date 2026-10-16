@@ -131,4 +131,32 @@ describe('audio catalogue gateway', () => {
       },
     )
   })
+  it('reports safe playback diagnostics and clears them after a successful retry', async () => {
+    let unavailable = true
+    await withServer(
+      async (url) => {
+        if (url.pathname.includes('/metadata/'))
+          return Response.json({ files: [{ name: 'song.mp3' }] })
+        if (unavailable)
+          throw Error('net::ERR_CERT_AUTHORITY_INVALID https://secret.example/?token=private')
+        return new Response('real audio bytes', { headers: { 'Content-Type': 'audio/mpeg' } })
+      },
+      async (origin) => {
+        const query = '?release=test&file=song.mp3'
+        expect((await fetch(`${origin}/api/archive/audio${query}`)).status).toBe(502)
+        const diagnostic = await (
+          await fetch(`${origin}/api/archive/playback-status${query}`)
+        ).json()
+        expect(diagnostic.failure).toMatchObject({ code: 'TLS', stage: 'audio' })
+        expect(JSON.stringify(diagnostic)).not.toMatch(/secret|token|private|https:/)
+        unavailable = false
+        expect(await (await fetch(`${origin}/api/archive/audio${query}`)).text()).toBe(
+          'real audio bytes',
+        )
+        expect(await (await fetch(`${origin}/api/archive/playback-status${query}`)).json()).toEqual(
+          { failure: null },
+        )
+      },
+    )
+  })
 })

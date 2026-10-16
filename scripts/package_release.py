@@ -18,7 +18,11 @@ html = exports / 'Volna.html'
 if not html.is_file():
     raise SystemExit('Run npm run export:html first.')
 
-notes = '''VOLNA 1.3.0 — музыка на твоей волне
+version = json.loads((ROOT / 'package.json').read_text())['version']
+notes = f'''VOLNA {version} — музыка на твоей волне
+
+Исправлена загрузка MP3 через перенаправления в Electron.
+Ошибка аудио теперь показывает причину и позволяет повторить загрузку.
 
 Windows: полностью закрой старую Volna и запусти новый EXE.
 HTML: распакуй архив и открой Volna.html в современном браузере.

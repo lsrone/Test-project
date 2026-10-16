@@ -4229,3 +4229,41 @@ h2 {
     animation: none;
   }
 }
+
+.playback-failure {
+  position: fixed;
+  bottom: calc(var(--player-height) + 12px);
+  left: calc(var(--sidebar-width) + 24px);
+  right: 24px;
+  z-index: 42;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #415d90;
+  border-radius: 12px;
+  background: #1c2940;
+  color: #c7d8ff;
+  font-size: 12px;
+  box-shadow: 0 8px 30px #0003;
+}
+.playback-failure > svg {
+  flex-shrink: 0;
+}
+.playback-failure > span {
+  flex: 1;
+}
+.playback-failure .text-button {
+  white-space: nowrap;
+}
+@media (max-width: 700px) {
+  .playback-failure {
+    left: 12px;
+    right: 12px;
+    bottom: 150px;
+    flex-wrap: wrap;
+  }
+  .playback-failure > span {
+    flex-basis: 75%;
+  }
+}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDownToLine,
   ArrowRight,
+  AlertCircle,
   AudioLines,
   Check,
   ChevronDown,
@@ -53,6 +54,7 @@ import { useListening } from './useListening'
 import { useStoredState } from './storage'
 import { AudioSearch } from './AudioSearch'
 import { archiveResource, isPlayable } from './audioSource'
+import { describePlaybackFailure, type PlaybackFailure } from './playbackFailure'
 import { WaveParticles } from './WaveParticles'
 import OpenLibrary from './OpenLibrary'
 import { useWave } from './useWave'
@@ -178,6 +180,7 @@ export default function App() {
   const [waveActive, setWaveActive] = useState(false)
   const [playing, setPlaying] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [playbackFailure, setPlaybackFailure] = useState<PlaybackFailure | null>(null)
   const [progress, setProgress] = useState(0)
   const [duration, setDuration] = useState(48)
   const [shuffle, setShuffle] = useState(false)
@@ -402,6 +405,15 @@ export default function App() {
       previous.includes(id) ? previous.filter((item) => item !== id) : [id, ...previous],
     )
   }
+  async function reportPlaybackFailure(error: unknown, track: Track, request: number) {
+    if (request !== playbackRequest.current) return
+    const mediaCode = audio.current?.error?.code || 0
+    if ((error instanceof Error && error.name === 'AbortError') || mediaCode === 1) return
+    setLoading(false)
+    setPlaying(false)
+    const failure = await describePlaybackFailure(track, mediaCode, error)
+    if (request === playbackRequest.current && failure) setPlaybackFailure(failure)
+  }
   async function playTrack(track: Track, list?: string[], fromWave = false) {
     if (!track) return
     if (!isPlayable(track)) {
@@ -410,6 +422,8 @@ export default function App() {
     }
     setWaveActive(fromWave)
     const request = ++playbackRequest.current
+    setPlaybackFailure(null)
+    setDuration(track.duration)
     let source = archiveResource(track.audio)
     if (track.source === 'archive') {
       try {
@@ -432,20 +446,16 @@ export default function App() {
     setAudioOverride({ id: track.id, src: source })
     if (current.id === track.id && effectiveAudio === source) {
       if (audio.current?.error) audio.current.load()
-      void audio.current?.play().catch(() => {
-        setLoading(false)
-        notify('Не удалось воспроизвести трек. Попробуй ещё раз.')
-      })
+      void audio.current?.play().catch((error) => reportPlaybackFailure(error, track, request))
     } else setCurrentId(track.id)
   }
   function togglePlayback() {
     if (!audio.current) return
     if (playing) audio.current.pause()
     else if (effectiveAudio && audio.current.readyState > 0 && !audio.current.error) {
-      void audio.current.play().catch(() => {
-        setLoading(false)
-        notify('Не удалось продолжить воспроизведение. Попробуй ещё раз.')
-      })
+      const request = ++playbackRequest.current
+      setPlaybackFailure(null)
+      void audio.current.play().catch((error) => reportPlaybackFailure(error, current, request))
     } else playTrack(current, undefined, waveActive)
   }
   function nextTrack(direction = 1) {
@@ -543,13 +553,11 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (!autoplay.current || !audio.current) return
+    if (!autoplay.current || !effectiveAudio || !audio.current) return
+    const request = playbackRequest.current
     setProgress(0)
     setLoading(true)
-    void audio.current.play().catch(() => {
-      setLoading(false)
-      notify('Не удалось включить музыку. Нажми воспроизведение ещё раз.')
-    })
+    void audio.current.play().catch((error) => reportPlaybackFailure(error, current, request))
   }, [current.id, effectiveAudio])
   useEffect(() => {
     if (audio.current) audio.current.volume = Math.min(1, Math.max(0, volume))
@@ -1678,6 +1686,36 @@ export default function App() {
         </aside>
       )}
 
+      {playbackFailure && (
+        <div className="playback-failure" role="alert">
+          <AlertCircle size={19} />
+          <span>{playbackFailure.message}</span>
+          <button
+            className="text-button"
+            onClick={() => void playTrack(current, undefined, waveActive)}
+          >
+            Повторить
+          </button>
+          <button
+            className="text-button"
+            onClick={() => {
+              void navigator.clipboard
+                .writeText(playbackFailure.diagnostic)
+                .then(() => notify('Диагностика скопирована'))
+                .catch(() => notify('Браузер не разрешил копирование'))
+            }}
+          >
+            Копировать диагностику
+          </button>
+          <button
+            className="icon-button"
+            aria-label="Закрыть ошибку воспроизведения"
+            onClick={() => setPlaybackFailure(null)}
+          >
+            <X size={17} />
+          </button>
+        </div>
+      )}
       <footer className="player" aria-label="Музыкальный плеер">
         <div className="player-track">
           <button
@@ -2100,6 +2138,7 @@ export default function App() {
         }}
         onPlaying={() => {
           setLoading(false)
+          setPlaybackFailure(null)
         }}
         onWaiting={() => {
           if (playing) setLoading(true)
@@ -2116,9 +2155,7 @@ export default function App() {
           else setPlaying(false)
         }}
         onError={() => {
-          setPlaying(false)
-          setLoading(false)
-          notify('Аудиофайл недоступен. Попробуй другой трек или проверь интернет.')
+          void reportPlaybackFailure(undefined, current, playbackRequest.current)
         }}
       />
     </div>
