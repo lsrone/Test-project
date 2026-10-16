@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, Menu, nativeTheme, shell, net } from 'electron'
 import { join } from 'node:path'
 import { createArchiveApi } from '../server/archive.mjs'
+import { createYouTubeSearchApi } from '../server/youtube-search.mjs'
 import { desktopFetch } from './network.mjs'
 import { startAppServer } from '../server/app-server.mjs'
 
@@ -23,6 +24,9 @@ else {
       service = await startAppServer({
         root: join(app.getAppPath(), 'dist'),
         catalogApi: createArchiveApi({ fetcher: desktopFetch((...args) => net.request(...args)) }),
+        youtubeApi: createYouTubeSearchApi({
+          fetcher: desktopFetch((...args) => net.request(...args)),
+        }),
       })
       window = new BrowserWindow({
         width: 1450,

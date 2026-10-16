@@ -8,8 +8,19 @@ import { join, resolve } from 'node:path'
 // ELECTRON_PATH selects an independently checksum-verified runtime when the
 // dependency was installed with ELECTRON_SKIP_BINARY_DOWNLOAD=1.
 const profile = await mkdtemp(join(tmpdir(), 'volna-electron-live-'))
-const redirects = createServer((req, res) => {
-  if (req.url === '/redirect') {
+const redirects = createServer(async (req, res) => {
+  if (req.url === '/post') {
+    const body = []
+    for await (const chunk of req) body.push(chunk)
+    res.setHeader('Content-Type', 'application/json')
+    res.end(
+      JSON.stringify({
+        method: req.method,
+        body: JSON.parse(Buffer.concat(body).toString()),
+        type: req.headers['content-type'],
+      }),
+    )
+  } else if (req.url === '/redirect') {
     res.writeHead(302, { Location: '/audio' })
     res.end()
   } else {
@@ -53,6 +64,12 @@ try {
       const url = new URL(redirected.headers.get('location'), origin)
       const audio = await fetcher(url, { headers: { Range: 'bytes=2-5' } })
       const head = await fetcher(url, { method: 'HEAD' })
+      const post = await fetcher(`${origin}/post`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: 'ØDEN Blink' }),
+      })
+      const posted = await post.json()
       const controller = new AbortController()
       controller.abort()
       let aborted
@@ -63,6 +80,7 @@ try {
       }
       return {
         originalError,
+        posted,
         redirectStatus: redirected.status,
         status: audio.status,
         range: audio.headers.get('content-range'),
@@ -76,6 +94,7 @@ try {
   )
   expect(transport).toEqual({
     originalError: 'Redirect was cancelled',
+    posted: { method: 'POST', body: { query: 'ØDEN Blink' }, type: 'application/json' },
     redirectStatus: 302,
     status: 206,
     range: 'bytes 2-5/10',
@@ -89,6 +108,7 @@ try {
   const errors = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('Aydio')
+  await page.getByRole('tab', { name: 'Аудиокаталог', exact: true }).click()
   const row = page
     .locator('.audio-search .track-row')
     .filter({ hasText: 'Aydio_-_03_-_XHD' })

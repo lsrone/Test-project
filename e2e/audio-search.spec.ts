@@ -9,6 +9,7 @@ test('search defaults to audio rows, plays full audio and saves newest first acr
   await mockArchive(page)
   await page.goto('/')
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('ambient')
+  await page.getByRole('tab', { name: 'Аудиокаталог', exact: true }).click()
   await expect(page.getByRole('tab', { name: 'Аудиокаталог', exact: true })).toHaveAttribute(
     'aria-selected',
     'true',
@@ -50,6 +51,7 @@ test('source failure is visible and retry recovers while built-in audio remains 
   await mockArchive(page, { fail: true })
   await page.goto('/')
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('jazz')
+  await page.getByRole('tab', { name: 'Аудиокаталог', exact: true }).click()
   await expect(page.locator('.audio-search [role=alert]')).toBeVisible()
   await mockArchive(page, { genre: 'jazz' })
   await page.getByRole('button', { name: 'Повторить', exact: true }).click()
@@ -76,6 +78,7 @@ test('audio error shows the transport reason, retries successfully and ignores r
   )
   await page.goto('/')
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('ambient')
+  await page.getByRole('tab', { name: 'Аудиокаталог', exact: true }).click()
   await page.getByRole('button', { name: 'Слушать Ocean Lights', exact: true }).click()
   const error = page.locator('.playback-failure')
   await expect(error).toContainText('защищённое соединение')

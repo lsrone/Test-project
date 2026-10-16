@@ -11,7 +11,9 @@ export function desktopFetch(requestWithChromium) {
     const signal = timeoutMs
       ? AbortSignal.any([request.signal, AbortSignal.timeout(timeoutMs)])
       : request.signal
-    if (!['GET', 'HEAD'].includes(request.method)) throw Error('Unsupported catalogue method')
+    if (!['GET', 'HEAD', 'POST'].includes(request.method))
+      throw Error('Unsupported catalogue method')
+    const payload = request.method === 'POST' ? Buffer.from(await request.arrayBuffer()) : undefined
     signal.throwIfAborted()
     return new Promise((resolve, reject) => {
       const outgoing = requestWithChromium({
@@ -57,7 +59,7 @@ export function desktopFetch(requestWithChromium) {
         if (bodyless) incoming.resume()
       })
       for (const [name, value] of request.headers) outgoing.setHeader(name, value)
-      outgoing.end()
+      outgoing.end(payload)
     })
   }
 }

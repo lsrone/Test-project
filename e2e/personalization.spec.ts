@@ -39,6 +39,7 @@ test('legacy YouTube likes survive, are not queued as audio, and new playable fa
   await expect(page.getByRole('button', { name: 'Слушать коллекцию', exact: true })).toBeDisabled()
   await expect(page.locator('.collection-meta')).not.toContainText('Алекс')
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('ambient')
+  await page.getByRole('tab', { name: 'Аудиокаталог', exact: true }).click()
   await page.getByRole('button', { name: 'Добавить Ocean Lights в избранное', exact: true }).click()
   await page.reload()
   await page
@@ -62,6 +63,7 @@ test('an explicit search choice teaches the wave a genre and cached unselected r
   const queries = await mockArchive(page, { genre: 'jazz' })
   await page.goto('/')
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('saxophone')
+  await page.getByRole('tab', { name: 'Аудиокаталог', exact: true }).click()
   await page.getByRole('button', { name: 'Слушать Ocean Lights', exact: true }).click()
   expect(
     await page.evaluate(() =>
@@ -79,6 +81,8 @@ test('search retains focus and cursor through keyboard layout modifiers', async 
   await page.goto('/')
   const input = page.getByRole('textbox', { name: 'Поиск музыки' })
   await input.fill('jazz')
+  await page.getByRole('tab', { name: 'Аудиокаталог', exact: true }).click()
+  await input.focus()
   await input.press('Alt+Shift')
   await page.keyboard.insertText('джаз')
   await expect(input).toHaveValue('jazzджаз')

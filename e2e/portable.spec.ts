@@ -51,6 +51,7 @@ test('portable HTML searches the public audio source directly and plays music wi
   await mockArchive(page)
   await page.setContent(await readFile('exports/Volna.html', 'utf8'))
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('ambient')
+  await page.getByRole('tab', { name: 'Аудиокаталог', exact: true }).click()
   await expect(page.locator('.audio-search .track-row')).toHaveCount(4)
   await page.getByRole('button', { name: 'Слушать Ocean Lights', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Пауза', exact: true })).toBeVisible()

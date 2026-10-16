@@ -19,6 +19,7 @@ try {
   page.on('request', (request) => requests.push(request.url()))
   await page.goto(app.origin)
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('ambient')
+  await page.getByRole('tab', { name: 'Аудиокаталог', exact: true }).click()
   const row = page.locator('.audio-search .track-row').first()
   await expect(row).toBeVisible({ timeout: 40000 })
   const title = await row.locator('.track-info strong').textContent()

@@ -12,6 +12,7 @@ test('mobile global search plays audio rows without video or overflow', async ({
   await page.goto('/')
   await page.locator('.mobile-nav').getByRole('button', { name: 'Поиск', exact: true }).click()
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('Музыка')
+  await page.getByRole('tab', { name: 'Аудиокаталог', exact: true }).click()
   await expect(page.locator('.audio-search .track-row')).toHaveCount(4)
   expect(await page.evaluate(() => document.body.scrollWidth <= innerWidth)).toBe(true)
   await page.getByRole('button', { name: 'Слушать Discovery 1', exact: true }).click()
@@ -61,4 +62,20 @@ test('mobile app fits the screen, plays music and navigates the collection', asy
   await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('Luna')
   await page.getByRole('tab', { name: 'В библиотеке' }).click()
   await expect(page.locator('.track-info strong')).toHaveText('Velvet Sky')
+})
+
+test('mobile YouTube search fits three source tabs and opens no embedded player', async ({
+  page,
+}) => {
+  const { mockYouTube } = await import('./youtube-fixture')
+  await mockYouTube(page, { total: 2 })
+  await page.goto('/')
+  await page.getByRole('textbox', { name: 'Поиск музыки' }).fill('ØDEN Blink')
+  await expect(page.locator('.youtube-search .track-row')).toHaveCount(2)
+  await expect(page.getByRole('tab', { name: 'YouTube', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  expect(await page.evaluate(() => document.body.scrollWidth <= innerWidth)).toBe(true)
+  await expect(page.locator('iframe,video')).toHaveCount(0)
 })

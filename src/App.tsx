@@ -3,6 +3,9 @@ import {
   ArrowDownToLine,
   ArrowRight,
   AlertCircle,
+  ExternalLink,
+  Link2,
+  Youtube,
   AudioLines,
   Check,
   ChevronDown,
@@ -53,6 +56,8 @@ import { type SearchChoice, type ListeningStat } from './musicTaste'
 import { useListening } from './useListening'
 import { useStoredState } from './storage'
 import { AudioSearch } from './AudioSearch'
+import { YouTubeSearch } from './YouTubeSearch'
+import { youtubeLink, trackSearchQuery, linkImportedTrack } from './youtube'
 import { archiveResource, isPlayable } from './audioSource'
 import { describePlaybackFailure, type PlaybackFailure } from './playbackFailure'
 import { WaveParticles } from './WaveParticles'
@@ -137,7 +142,8 @@ export default function App() {
   const route = routes[routeIndex]
   const page = route.page
   const [query, setQuery] = useState('')
-  const [searchSource, setSearchSource] = useState<'catalog' | 'library'>('catalog')
+  const [searchSource, setSearchSource] = useState<'youtube' | 'catalog' | 'library'>('youtube')
+  const [matchingTrackId, setMatchingTrackId] = useState<string | null>(null)
   const [tab, setTab] = useState('Все')
   const [mood, setMood] = useState<Mood>('all')
   const [liked, setLiked] = useStoredState<string[]>('volna.liked', [])
@@ -328,9 +334,21 @@ export default function App() {
     return result
   }
   function findAudio(track: Track) {
-    setSearchSource('catalog')
-    setQuery(`${track.artist.replace(/\s*[-–—]\s*Topic$/i, '')} ${track.title}`.slice(0, 120))
+    setSearchSource('youtube')
+    setMatchingTrackId(track.source === 'yandex' ? track.id : null)
+    setQuery(trackSearchQuery(track))
     navigate('search')
+  }
+  function openYouTube(track: Track, searchedQuery?: string) {
+    const url = youtubeLink(track)
+    if (!url) {
+      findAudio(track)
+      return
+    }
+    if (searchedQuery !== undefined) recordSearchChoice(track.id, searchedQuery)
+    audio.current?.pause()
+    setWaveActive(false)
+    window.open(url, '_blank', 'noopener,noreferrer')
   }
 
   useEffect(() => {
@@ -417,7 +435,7 @@ export default function App() {
   async function playTrack(track: Track, list?: string[], fromWave = false) {
     if (!track) return
     if (!isPlayable(track)) {
-      findAudio(track)
+      openYouTube(track)
       return
     }
     setWaveActive(fromWave)
@@ -689,8 +707,7 @@ export default function App() {
             <button
               className="track-cover"
               onClick={() => {
-                if (searchedQuery !== undefined && isPlayable(track))
-                  recordSearchChoice(track.id, searchedQuery)
+                if (searchedQuery !== undefined) recordSearchChoice(track.id, searchedQuery)
                 void playTrack(
                   track,
                   items.filter(isPlayable).map((t) => t.id),
@@ -698,16 +715,21 @@ export default function App() {
                 )
               }}
               aria-label={
-                !isPlayable(track) ? `Найти ${track.title} в каталоге` : `Слушать ${track.title}`
+                !isPlayable(track)
+                  ? youtubeLink(track)
+                    ? `Открыть ${track.title} на YouTube`
+                    : `Найти ${track.title} на YouTube`
+                  : `Слушать ${track.title}`
               }
             >
-              <Artwork
-                kind={track.artwork}
-                image={isPlayable(track) ? track.artworkUrl : undefined}
-              />
+              <Artwork kind={track.artwork} image={track.artworkUrl} />
               <span>
                 {!isPlayable(track) ? (
-                  <Search size={18} />
+                  youtubeLink(track) ? (
+                    <ExternalLink size={18} />
+                  ) : (
+                    <Search size={18} />
+                  )
                 ) : current.id === track.id && playing ? (
                   <AudioLines size={20} />
                 ) : (
@@ -718,8 +740,7 @@ export default function App() {
             <button
               className="track-info"
               onClick={() => {
-                if (searchedQuery !== undefined && isPlayable(track))
-                  recordSearchChoice(track.id, searchedQuery)
+                if (searchedQuery !== undefined) recordSearchChoice(track.id, searchedQuery)
                 void playTrack(
                   track,
                   items.filter(isPlayable).map((t) => t.id),
@@ -733,8 +754,30 @@ export default function App() {
             <span className="track-genre">
               {isPlayable(track)
                 ? track.genre
-                : `Нет аудио · ${track.source === 'youtube' ? 'YouTube' : 'импорт'}`}
+                : youtubeLink(track)
+                  ? 'YouTube · в браузере'
+                  : 'Найти на YouTube'}
             </span>
+            {matchingTrackId &&
+              track.source === 'youtube' &&
+              page === 'search' &&
+              searchSource === 'youtube' && (
+                <button
+                  className="icon-button match-youtube"
+                  aria-label={`Связать с ${track.title}`}
+                  title="Связать с перенесённым треком"
+                  onClick={() => {
+                    setOnlineTracks((previous) =>
+                      linkImportedTrack(previous, matchingTrackId, track),
+                    )
+                    recordSearchChoice(matchingTrackId, searchedQuery || query)
+                    setMatchingTrackId(null)
+                    notify('Запись YouTube связана с перенесённым треком')
+                  }}
+                >
+                  <Link2 size={18} />
+                </button>
+              )}
             <button
               className={`icon-button like-button ${liked.includes(track.id) ? 'active' : ''}`}
               aria-label={
@@ -796,6 +839,17 @@ export default function App() {
                     onClick={() => setMenuTrack(null)}
                   />
                   <div className="context-menu">
+                    {!isPlayable(track) && (
+                      <button
+                        onClick={() => {
+                          findAudio(track)
+                          setMenuTrack(null)
+                        }}
+                      >
+                        <Search size={16} />
+                        Найти другую запись YouTube
+                      </button>
+                    )}
                     {track.sourceUrl && (
                       <a href={track.sourceUrl} target="_blank" rel="noopener noreferrer">
                         Источник и условия
@@ -1050,7 +1104,9 @@ export default function App() {
               placeholder={
                 page === 'search' && searchSource === 'library'
                   ? 'Поиск в библиотеке'
-                  : 'Поиск в аудиокаталоге'
+                  : searchSource === 'youtube'
+                    ? 'Поиск на YouTube'
+                    : 'Поиск в аудиокаталоге'
               }
               maxLength={120}
               value={query}
@@ -1364,9 +1420,11 @@ export default function App() {
                     <span className="heading-dot">.</span>
                   </h1>
                   <p>
-                    {searchSource === 'catalog'
-                      ? 'Ищи полные аудиозаписи независимых музыкантов.'
-                      : 'Ищи среди добавленных треков и скачанной музыки.'}
+                    {searchSource === 'youtube'
+                      ? 'Ищи любимые записи YouTube и открывай их в браузере.'
+                      : searchSource === 'catalog'
+                        ? 'Ищи полные аудиозаписи независимых музыкантов.'
+                        : 'Ищи среди добавленных треков и скачанной музыки.'}
                   </p>
                 </div>
               </div>
@@ -1378,18 +1436,29 @@ export default function App() {
                   onKeyDown={(event) => {
                     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
                     event.preventDefault()
+                    const sources = ['youtube', 'catalog', 'library'] as const
                     const index =
                       event.key === 'Home'
                         ? 0
                         : event.key === 'End'
-                          ? 1
-                          : searchSource === 'catalog'
-                            ? 1
-                            : 0
-                    setSearchSource(index === 0 ? 'catalog' : 'library')
+                          ? 2
+                          : (sources.indexOf(searchSource) + (event.key === 'ArrowLeft' ? 2 : 1)) %
+                            3
+                    setSearchSource(sources[index])
                     event.currentTarget.querySelectorAll('button')[index]?.focus()
                   }}
                 >
+                  <button
+                    id="search-youtube-tab"
+                    role="tab"
+                    aria-controls="search-results"
+                    aria-selected={searchSource === 'youtube'}
+                    tabIndex={searchSource === 'youtube' ? 0 : -1}
+                    onClick={() => setSearchSource('youtube')}
+                  >
+                    <Youtube size={16} />
+                    YouTube
+                  </button>
                   <button
                     id="search-catalog-tab"
                     role="tab"
@@ -1419,10 +1488,33 @@ export default function App() {
                 id="search-results"
                 role="tabpanel"
                 aria-labelledby={
-                  searchSource === 'catalog' ? 'search-catalog-tab' : 'search-library-tab'
+                  searchSource === 'youtube'
+                    ? 'search-youtube-tab'
+                    : searchSource === 'catalog'
+                      ? 'search-catalog-tab'
+                      : 'search-library-tab'
                 }
               >
-                {searchSource === 'catalog' ? (
+                {searchSource === 'youtube' ? (
+                  <>
+                    {matchingTrackId && byId(matchingTrackId) && (
+                      <div className="youtube-match-banner" role="status">
+                        <span>
+                          Подбор для «{byId(matchingTrackId).artist} — {byId(matchingTrackId).title}
+                          ». Свяжи подходящую запись кнопкой <Link2 size={15} />.
+                        </span>
+                        <button className="text-button" onClick={() => setMatchingTrackId(null)}>
+                          Отменить подбор
+                        </button>
+                      </div>
+                    )}
+                    <YouTubeSearch
+                      query={query}
+                      onImport={importTracks}
+                      renderTracks={(items, text) => renderTrackRows(items, true, text)}
+                    />
+                  </>
+                ) : searchSource === 'catalog' ? (
                   <AudioSearch
                     query={query}
                     onImport={importTracks}
@@ -1510,9 +1602,9 @@ export default function App() {
               </div>
               {collectionTracks.some((track) => !isPlayable(track)) && (
                 <div className="catalog-scope legacy-notice">
-                  Сохранённые записи YouTube и Яндекс Музыки остались в коллекции как названия и
-                  ссылки. Значок поиска проверяет наличие в аудиокаталоге; совпадения не
-                  гарантированы.
+                  YouTube-записи открываются в браузере. Для импорта Яндекса нажми лупу, найди
+                  нужную запись и свяжи её с треком. Избранное и плейлисты сохранятся; аудиофайлы и
+                  подписка Яндекса не переносятся.
                 </div>
               )}
               <div className="collection-controls">
