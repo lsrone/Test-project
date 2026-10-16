@@ -31,7 +31,7 @@ export function createPublicYouTubeSearch({ fetcher, now = Date.now }) {
     return client
   }
 
-  return async (query, pageToken = '') => {
+  const search = async (query, pageToken = '') => {
     for (const [token, saved] of pages) {
       if (saved.expires <= now()) pages.delete(token)
     }
@@ -74,4 +74,30 @@ export function createPublicYouTubeSearch({ fetcher, now = Date.now }) {
     }
     return { items, nextPageToken }
   }
+  search.related = async (id) => {
+    if (!VIDEO_ID.test(id)) throw new Error('Invalid video')
+    const info = await (await getClient()).getInfo(id)
+    const seen = new Set([id])
+    return {
+      items: (info.watch_next_feed || [])
+        .flatMap((video) => {
+          const key = video.video_id ?? video.id
+          if (!VIDEO_ID.test(key) || seen.has(key)) return []
+          seen.add(key)
+          return [
+            {
+              id: key,
+              title: String(video.title ?? 'Музыка'),
+              channel:
+                video.author?.name && video.author.name !== 'N/A'
+                  ? String(video.author.name)
+                  : String(video.long_byline_text ?? video.short_byline_text ?? 'YouTube'),
+              thumbnail: `https://i.ytimg.com/vi/${key}/hqdefault.jpg`,
+            },
+          ]
+        })
+        .slice(0, 30),
+    }
+  }
+  return search
 }

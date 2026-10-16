@@ -69,6 +69,59 @@ async function call(middleware, url: string) {
 }
 
 describe('GitHub YouTube.js public search integration', () => {
+  it('parses a related feed through the real YouTube.js player and next-response parser', async () => {
+    const fetcher = async (input, options) => {
+      const url = new URL(new Request(input, options).url)
+      if (url.pathname.endsWith('/player'))
+        return new Response(
+          JSON.stringify({
+            playabilityStatus: { status: 'OK', playableInEmbed: true },
+            videoDetails: {
+              videoId: 'seed0000001',
+              title: 'Seed',
+              author: 'Artist',
+              lengthSeconds: '180',
+              viewCount: '1',
+              thumbnail: { thumbnails: [] },
+            },
+          }),
+        )
+      if (url.pathname.endsWith('/next'))
+        return new Response(
+          JSON.stringify({
+            contents: {
+              twoColumnWatchNextResults: {
+                results: { results: { contents: [] } },
+                secondaryResults: {
+                  secondaryResults: {
+                    results: [
+                      {
+                        compactVideoRenderer: {
+                          videoId: 'more0000001',
+                          title: { simpleText: 'Related track' },
+                          shortBylineText: { runs: [{ text: 'Related artist' }] },
+                          thumbnail: { thumbnails: [] },
+                          lengthText: { simpleText: '3:00' },
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          }),
+        )
+      throw new Error('Unexpected provider request')
+    }
+    const response = await call(
+      createYouTubeApi({ getApiKey: () => undefined, fetcher }),
+      '/api/youtube/related?id=seed0000001',
+    )
+    expect(response.status).toBe(200)
+    expect(response.body.items).toMatchObject([
+      { id: 'more0000001', title: 'Related track', channel: 'Related artist' },
+    ])
+  })
   it('parses real provider-shaped responses, follows continuations, and caches without a user key', async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL, options?: RequestInit) => {
       const request = new Request(input, options)

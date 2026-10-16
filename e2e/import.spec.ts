@@ -59,11 +59,8 @@ test('imports 128 CSV tracks, merges repeated imports, persists playlists and fa
   await page.getByRole('button', { name: 'Найти My track 127 на YouTube', exact: true }).click()
   await expect(page.locator('.youtube-result')).toHaveCount(1)
   await page.getByRole('button', { name: 'Включить Matched imported recording' }).click()
-  await expect(page.locator('.player-youtube iframe')).toHaveAttribute(
-    'src',
-    /youtube-nocookie\.com\/embed\/jfKfPfyJRdk/,
-  )
-  await expect(page.locator('audio')).toHaveJSProperty('paused', true)
+  await expect(page.locator('iframe,video')).toHaveCount(0)
+  await expect(page.locator('audio')).toHaveJSProperty('paused', false)
   expect(sent).toEqual([])
 })
 

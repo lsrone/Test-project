@@ -1,8 +1,40 @@
 import { describe, expect, it } from 'vitest'
 import { tracks } from './catalog'
 import { recommend, searchTracks } from './recommendations'
+import { youtubeTrack } from './youtube'
+import { personalSeeds } from './musicTaste'
 
 describe('personal recommendations', () => {
+  it('uses chosen search results, related discoveries and skips instead of treating every YouTube result as a taste signal', () => {
+    const seed = youtubeTrack({
+      id: 'seed0000001',
+      title: 'Artist - Night wave',
+      channel: 'Artist - Topic',
+    })
+    const sameArtist = youtubeTrack({
+      id: 'same0000001',
+      title: 'Artist - New wave',
+      channel: 'Artist',
+    })
+    const related = {
+      ...youtubeTrack({ id: 'more0000001', title: 'New artist - Evening', channel: 'New artist' }),
+      recommendationSeed: seed.id,
+    }
+    const unrelated = youtubeTrack({ id: 'else0000001', title: 'Unrelated', channel: 'Someone' })
+    const catalog = [unrelated, seed, sameArtist, related]
+    const choices = [{ trackId: seed.id, query: 'night wave', count: 1 }]
+    const options = {
+      choices,
+      listening: { [sameArtist.id]: { seconds: 8, plays: 0, completions: 0, skips: 4 } },
+    }
+    const result = recommend(catalog, [], [seed.id], 'all', options)
+    expect(result[0].id).toBe(related.id)
+    expect(result.findIndex((t) => t.id === unrelated.id)).toBeLessThan(
+      result.findIndex((t) => t.id === sameArtist.id),
+    )
+    expect(personalSeeds(catalog, [], [], { choices }).map((t) => t.id)).toEqual([seed.id])
+    expect(new Set(result.map((t) => t.id)).size).toBe(catalog.length)
+  })
   it('learns from likes and prioritizes an unheard track in the preferred genre', () => {
     const ranked = recommend(tracks, ['neon-dreams'], ['neon-dreams'])
     expect(ranked[0].id).toBe('blue-hour')

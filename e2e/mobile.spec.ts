@@ -30,7 +30,7 @@ test('mobile global search shows YouTube results as a list without overflow', as
   await expect(list.getByRole('listitem')).toHaveCount(2)
   expect(await page.evaluate(() => document.body.scrollWidth <= innerWidth)).toBe(true)
   await page.getByRole('button', { name: 'Слушать Ещё одна запись', exact: true }).click()
-  await expect(page.locator('.player-youtube iframe')).toHaveAttribute('src', /embed\/4xDzrJKXOOY/)
+  await expect(page.locator('iframe,video')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Пауза', exact: true })).toBeVisible()
   await expect(page.locator('.player-track-info strong')).toHaveText('Ещё одна запись')
   expect(await page.evaluate(() => document.body.scrollWidth <= innerWidth)).toBe(true)

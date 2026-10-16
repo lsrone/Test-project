@@ -12,6 +12,8 @@ export interface Track {
   moods: Mood[]
   source?: 'archive' | 'yandex' | 'youtube'
   youtubeId?: string
+  recommendationSeed?: string
+  tags?: string[]
   sourceUrl?: string
   artworkUrl?: string
   album?: string

@@ -279,6 +279,8 @@ export function prepareLibraryImport(
   const groups = new Map<string, string[]>()
   const favourites = new Set(liked)
   let added = 0
+  const newIds: string[] = [],
+    newFavourites: string[] = []
   for (const song of file.songs) {
     const key = songKey(song)
     const id = known.get(key)?.id || `yandex:${song.yandexId || `meta-${stableId(key)}`}`
@@ -301,10 +303,14 @@ export function prepareLibraryImport(
           : `https://music.yandex.ru/search?text=${encodeURIComponent(`${song.artist} ${song.title}`)}`,
       }
       tracksById.set(id, track)
+      newIds.push(id)
       known.set(key, track)
       added++
     }
-    if (song.liked || options.allLiked) favourites.add(id)
+    if ((song.liked || options.allLiked) && !favourites.has(id)) {
+      newFavourites.push(id)
+      favourites.add(id)
+    }
     const names =
       options.keepPlaylists && song.playlists.length
         ? song.playlists
@@ -328,13 +334,19 @@ export function prepareLibraryImport(
     const previous = result.get(playlist.id)
     result.set(playlist.id, {
       ...playlist,
-      tracks: [...new Set([...(previous?.tracks || []), ...playlist.tracks])],
+      tracks: [
+        ...playlist.tracks.filter((id) => !previous?.tracks.includes(id)),
+        ...(previous?.tracks || []),
+      ],
     })
   }
   return {
-    onlineTracks: [...tracksById.values()],
+    onlineTracks: [
+      ...newIds.map((id) => tracksById.get(id)!),
+      ...onlineTracks.map((track) => tracksById.get(track.id)!),
+    ],
     playlists: [...result.values()],
-    liked: [...favourites],
+    liked: [...newFavourites, ...liked],
     added,
     reused: file.songs.length - added,
     playlistCount: importedPlaylists.length,

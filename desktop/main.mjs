@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, nativeTheme, shell } from 'electron'
 import { join } from 'node:path'
 import { startAppServer } from '../server/app-server.mjs'
 
@@ -14,6 +14,7 @@ else {
     }
   })
   app.whenReady().then(async () => {
+    Menu.setApplicationMenu(null)
     nativeTheme.themeSource = 'dark'
     try {
       // The fixed loopback origin keeps the music library stable between launches.
@@ -54,6 +55,7 @@ else {
         }
       })
       window.once('ready-to-show', () => window.show())
+      window.on('focus', () => window?.webContents.focus())
       await window.loadURL(service.origin)
       window.on('closed', () => {
         window = null

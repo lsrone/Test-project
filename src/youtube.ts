@@ -4,6 +4,7 @@ export interface YouTubeVideo {
   channel: string
   thumbnail?: string
 }
+import { musicalTags } from './musicTaste'
 
 export const isPortable = () =>
   location.protocol === 'file:' || document.documentElement.dataset.portable === 'true'
@@ -40,6 +41,7 @@ import type { Track } from './catalog'
 
 export function youtubeTrack(video: YouTubeVideo): Track {
   if (!/^[A-Za-z0-9_-]{11}$/.test(video.id)) throw new Error('Некорректная ссылка YouTube')
+  const taste = musicalTags(`${video.title} ${video.channel}`)
   return {
     id: `youtube:${video.id}`,
     youtubeId: video.id,
@@ -52,7 +54,8 @@ export function youtubeTrack(video: YouTubeVideo): Track {
     color: '#5485ff',
     audio: '',
     duration: 0,
-    moods: [],
+    moods: taste.moods,
+    tags: taste.tags,
     sourceUrl: youtubeUrl(video.id),
     artworkUrl: `https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`,
     downloadAllowed: false,

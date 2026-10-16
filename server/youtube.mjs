@@ -1,13 +1,20 @@
 import { EnvHttpProxyAgent } from 'undici'
 import { createPublicYouTubeSearch, ExpiredYouTubePage } from './public-youtube.mjs'
+import { createYouTubeAudio, AudioUnavailable } from './youtube-audio.mjs'
+import { sameRecording } from './music-matching.mjs'
 
 const agent = new EnvHttpProxyAgent()
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/
 
 function proxyFetch(input, options = {}) {
-  const signals = [AbortSignal.timeout(12000), options.signal, input?.signal].filter(Boolean)
+  const { timeoutMs = 12000, ...rest } = options
+  const signals = [
+    timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
+    options.signal,
+    input?.signal,
+  ].filter(Boolean)
   return globalThis.fetch(input, {
-    ...options,
+    ...rest,
     dispatcher: agent,
     signal: AbortSignal.any(signals),
   })
@@ -28,9 +35,12 @@ export function createYouTubeApi({
   getApiKey = () => process.env.YOUTUBE_API_KEY,
   fetcher = proxyFetch,
   now = Date.now,
+  audioService,
+  publicSearchService,
 } = {}) {
   const cache = new Map()
-  const publicSearch = createPublicYouTubeSearch({ fetcher, now })
+  const publicSearch = publicSearchService || createPublicYouTubeSearch({ fetcher, now })
+  const audio = audioService || createYouTubeAudio({ fetcher })
   const reply = (res, status, data) => {
     res.statusCode = status
     res.setHeader('Content-Type', 'application/json; charset=utf-8')
@@ -42,10 +52,84 @@ export function createYouTubeApi({
   return async (req, res, next) => {
     const request = new URL(req.url || '/', 'http://localhost')
     if (!request.pathname.startsWith('/api/youtube/')) return next()
+    if (request.pathname === '/api/youtube/audio') {
+      if (!['GET', 'HEAD'].includes(req.method))
+        return reply(res, 405, { message: 'Разрешены GET и HEAD.' })
+      const id = request.searchParams.get('id') || ''
+      if (!VIDEO_ID.test(id)) return reply(res, 400, { message: 'Некорректная ссылка на запись.' })
+      try {
+        await audio.stream(req, res, id)
+      } catch {
+        if (res.headersSent) res.destroy()
+        else reply(res, 502, { message: 'Аудио этой записи недоступно. Попробуй другую запись.' })
+      }
+      return
+    }
     if (req.method !== 'GET') return reply(res, 405, { message: 'Разрешены только GET-запросы.' })
     const key = getApiKey()
     if (request.pathname === '/api/youtube/status')
       return reply(res, 200, { configured: true, mode: key ? 'official' : 'public' })
+    if (
+      request.pathname === '/api/youtube/resolve' ||
+      request.pathname === '/api/youtube/related'
+    ) {
+      const id = request.searchParams.get('id') || ''
+      if (!VIDEO_ID.test(id)) return reply(res, 400, { message: 'Некорректная ссылка на запись.' })
+      if (request.pathname.endsWith('/related')) {
+        try {
+          return reply(res, 200, await publicSearch.related(id))
+        } catch {
+          return reply(res, 502, {
+            message: 'Похожие записи пока не загрузились. Попробуй обновить волну.',
+          })
+        }
+      }
+      try {
+        const source = await audio.resolve(id)
+        return reply(res, 200, {
+          id,
+          audio: `/api/youtube/audio?id=${id}`,
+          duration: source.duration,
+        })
+      } catch (error) {
+        const title = request.searchParams.get('title') || '',
+          artist = request.searchParams.get('artist') || ''
+        if (
+          error instanceof AudioUnavailable &&
+          title.length <= 160 &&
+          artist.length <= 120 &&
+          title &&
+          artist
+        ) {
+          try {
+            const candidates = (await publicSearch(`${artist} ${title}`.slice(0, 120))).items
+              .filter((item) => item.id !== id && sameRecording(title, artist, item))
+              .slice(0, 3)
+            for (const item of candidates) {
+              try {
+                const source = await audio.resolve(item.id)
+                return reply(res, 200, {
+                  ...item,
+                  replacement: true,
+                  audio: `/api/youtube/audio?id=${item.id}`,
+                  duration: source.duration,
+                })
+              } catch {
+                /* Only a matching, available recording can replace the original. */
+              }
+            }
+          } catch {
+            /* Keep the readable original failure. */
+          }
+        }
+        return reply(res, 503, {
+          message:
+            error instanceof AudioUnavailable
+              ? error.message
+              : 'Не удалось получить аудио YouTube. Проверь доступ к источнику и попробуй ещё раз.',
+        })
+      }
+    }
     if (request.pathname !== '/api/youtube/search')
       return reply(res, 404, { message: 'Такого запроса нет.' })
     const query = request.searchParams.get('q')?.trim() || ''

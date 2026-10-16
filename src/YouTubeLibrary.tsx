@@ -27,8 +27,8 @@ export function YouTubeLibrary({
   liked = [],
   onResults,
 }: {
-  onPlay: (video: YouTubeVideo, results?: YouTubeVideo[]) => void
-  onSave?: (video: YouTubeVideo, playlist?: boolean) => void
+  onPlay: (video: YouTubeVideo, results?: YouTubeVideo[], query?: string) => void
+  onSave?: (video: YouTubeVideo, playlist?: boolean, query?: string) => void
   liked?: string[]
   onResults?: (items: YouTubeVideo[]) => void
   initialQuery?: string
@@ -260,7 +260,7 @@ export function YouTubeLibrary({
             <strong>Начни со ссылки на любимую музыку</strong>
             <p>
               {isPortable()
-                ? 'Откроем её на YouTube. Встроенный плеер и поиск доступны в серверной версии приложения.'
+                ? 'Откроем её на YouTube. Аудиоплеер и поиск доступны в серверной версии приложения.'
                 : 'Поиск приложения сейчас недоступен. Открой поиск на YouTube или вставь ссылку на видео для встроенного плеера.'}
             </p>
           </div>
@@ -299,7 +299,7 @@ export function YouTubeLibrary({
                   <button
                     className="youtube-result-art"
                     aria-label={`Включить ${video.title}`}
-                    onClick={() => onPlay(video, results.items)}
+                    onClick={() => onPlay(video, results.items, searchedQuery)}
                   >
                     <img
                       src={video.thumbnail}
@@ -319,7 +319,7 @@ export function YouTubeLibrary({
                   <div className="youtube-result-info">
                     <button
                       className="youtube-result-title"
-                      onClick={() => onPlay(video, results.items)}
+                      onClick={() => onPlay(video, results.items, searchedQuery)}
                     >
                       {video.title}
                     </button>
@@ -332,7 +332,7 @@ export function YouTubeLibrary({
                           className={`icon-button ${liked.includes(`youtube:${video.id}`) ? 'active' : ''}`}
                           aria-label={`${liked.includes(`youtube:${video.id}`) ? 'Убрать' : 'Добавить'} ${video.title} ${liked.includes(`youtube:${video.id}`) ? 'из избранного' : 'в избранное'}`}
                           aria-pressed={liked.includes(`youtube:${video.id}`)}
-                          onClick={() => onSave(video)}
+                          onClick={() => onSave(video, false, searchedQuery)}
                         >
                           <Heart
                             size={17}
@@ -342,7 +342,7 @@ export function YouTubeLibrary({
                         <button
                           className="icon-button"
                           aria-label={`Добавить ${video.title} в плейлист`}
-                          onClick={() => onSave(video, true)}
+                          onClick={() => onSave(video, true, searchedQuery)}
                         >
                           <Plus size={17} />
                         </button>
@@ -351,7 +351,7 @@ export function YouTubeLibrary({
                     <button
                       className="youtube-result-play icon-button"
                       aria-label={`Слушать ${video.title}`}
-                      onClick={() => onPlay(video, results.items)}
+                      onClick={() => onPlay(video, results.items, searchedQuery)}
                     >
                       <Play size={18} fill="currentColor" />
                     </button>
@@ -389,8 +389,8 @@ export function YouTubeLibrary({
         </div>
       )}
       <p className="youtube-fine-print">
-        Видео воспроизводятся официальным плеером YouTube. Доступность зависит от автора и региона;
-        нужен интернет.
+        Воспроизводим аудио без видео. Доступность записей зависит от источника и региона; нужен
+        интернет.
       </p>
     </div>
   )
