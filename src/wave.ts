@@ -4,7 +4,7 @@ import { CATALOG_PAGE_SIZE, findReleases, loadRelease } from './openCatalog'
 export interface WaveCursor {
   page: number
   offset: number
-  tokens?: Record<string,string>
+  tokens?: Record<string, string>
 }
 interface WaveOptions {
   tracks: Track[]
